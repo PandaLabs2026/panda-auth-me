@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>PandaAuth.Me</RootNamespace>
+    <AssemblyName>PandaAuth.Me</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenIddict.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 跨仓共享契约；要求 panda-auth-share 与本仓同级克隆（工作区布局见元仓 WORKSPACE.md） -->
+    <ProjectReference Include="..\..\..\panda-auth-share\src\PandaAuth.Shared\PandaAuth.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
