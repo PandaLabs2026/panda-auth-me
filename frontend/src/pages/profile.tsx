@@ -48,7 +48,10 @@ export default function ProfilePage() {
     <div className="min-h-screen">
       <header className="border-b bg-card">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <span className="font-bold text-primary">🐼 PandaAuth 账户中心</span>
+          <span className="flex items-center gap-2 font-bold text-primary">
+            <img src="/me/apple-touch-icon.png" alt="" className="h-6 w-6 rounded-md" />
+            PandaAuth 账户中心
+          </span>
           {session && (
             <Button variant="outline" size="sm" onClick={logout}>
               退出登录
