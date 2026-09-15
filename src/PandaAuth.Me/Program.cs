@@ -37,6 +37,7 @@ builder.Services.AddOpenIddict()
         options.AllowAuthorizationCodeFlow();
         options.AllowRefreshTokenFlow();
         options.AddEphemeralEncryptionKey();
+        options.AddEphemeralSigningKey();
         options.UseSystemNetHttp();
         options.UseAspNetCore()
             .EnableRedirectionEndpointPassthrough()
