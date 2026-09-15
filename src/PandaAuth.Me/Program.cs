@@ -34,6 +34,8 @@ builder.Services.AddHealthChecks();
 builder.Services.AddOpenIddict()
     .AddClient(options =>
     {
+        options.AllowAuthorizationCodeFlow();
+        options.AllowRefreshTokenFlow();
         options.UseSystemNetHttp();
         options.UseAspNetCore()
             .EnableRedirectionEndpointPassthrough()
