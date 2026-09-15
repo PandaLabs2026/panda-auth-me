@@ -34,6 +34,7 @@ builder.Services.AddHealthChecks();
 builder.Services.AddOpenIddict()
     .AddClient(options =>
     {
+        options.UseSystemNetHttp();
         options.UseAspNetCore()
             .EnableRedirectionEndpointPassthrough()
             .EnablePostLogoutRedirectionEndpointPassthrough()
