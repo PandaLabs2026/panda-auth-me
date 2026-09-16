@@ -135,10 +135,12 @@ app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 
 // 登录：challenge 到同域 IDP（用户看到 PandaAuth 统一登录页）。
+// returnUrl 是查询串里的用户输入，登录后会直接成为跳转目标——不经校验即是开放重定向。
+// 校验规则与理由集中在 LoginReturnUrl（可单测），此处不重复判定。
 app.MapGet("/me/login", (string? returnUrl) =>
     Results.Challenge(new AuthenticationProperties
     {
-        RedirectUri = string.IsNullOrEmpty(returnUrl) ? "/me/" : returnUrl,
+        RedirectUri = LoginReturnUrl.Sanitize(returnUrl),
     }));
 
 // OIDC 回调：复制身份与令牌到本服务会话 Cookie。
