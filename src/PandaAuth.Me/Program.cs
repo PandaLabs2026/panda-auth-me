@@ -28,6 +28,13 @@ builder.Services
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        // 时效：不沿用 ASP.NET Core 默认的「14 天滑动过期」——这枚 Cookie 里装着 refresh_token
+        // （IDP 侧有效期 14 天），默认值等于把一枚长期凭据长期留在浏览器上。收紧为
+        // 「闲置 8 小时过期、有活动即滑动续期」：这是安全与免重复登录之间的取舍——
+        // 闲置超过 8 小时需重新登录（可接受），连续使用的人不会被中途打断。
+        // 注意这只是浏览器侧时效；令牌本身的有效期由 IDP 与登出撤销另行约束，不由此值决定。
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
     });
 
 // 会话 Cookie、防伪令牌与 OpenIddict 客户端状态均由 DataProtection 保护。
@@ -55,6 +62,24 @@ if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
 builder.Services.AddAuthorization();
 builder.Services.AddHealthChecks();
 
+// IDP 侧取值集中取出：OpenIddict 客户端注册与登出撤销客户端共用同一组配置，避免两份事实源。
+var issuer = new Uri(builder.Configuration["Auth:Issuer"] ?? "http://localhost:9004/");
+var clientId = builder.Configuration["Auth:ClientId"] ?? "me-web";
+// 机密客户端密钥失败关闭：缺失/为空即拒绝启动，不回退明文默认值（与 server 侧 Seeder 行为对齐）。
+var clientSecret = builder.Configuration["Auth:ClientSecret"];
+if (string.IsNullOrWhiteSpace(clientSecret))
+{
+    throw new InvalidOperationException("缺少 Auth:ClientSecret 配置（me-web 为机密客户端，密钥须由部署环境注入）。");
+}
+
+// 登出撤销的 HTTP 客户端。超时必须收紧：撤销是登出请求路径上的同步动作，
+// 若沿用 HttpClient 默认的 100 秒，IDP 不可达时用户点一次登出要干等 100 秒。
+builder.Services.AddHttpClient<TokenRevocationClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Auth:RevocationTimeoutSeconds", 5));
+});
+builder.Services.AddSingleton(new TokenRevocationOptions(issuer, clientId, clientSecret));
+
 builder.Services.AddOpenIddict()
     .AddClient(options =>
     {
@@ -72,12 +97,9 @@ builder.Services.AddOpenIddict()
         options.AddRegistration(new OpenIddictClientRegistration
         {
             ProviderName = "pandaauth",
-            Issuer = new Uri(builder.Configuration["Auth:Issuer"] ?? "http://localhost:9004/"),
-            ClientId = builder.Configuration["Auth:ClientId"] ?? "me-web",
-            // 机密客户端密钥失败关闭：缺失/为空即拒绝启动，不回退明文默认值（与 server 侧 Seeder 行为对齐）。
-            ClientSecret = string.IsNullOrWhiteSpace(builder.Configuration["Auth:ClientSecret"])
-                ? throw new InvalidOperationException("缺少 Auth:ClientSecret 配置（me-web 为机密客户端，密钥须由部署环境注入）。")
-                : builder.Configuration["Auth:ClientSecret"]!,
+            Issuer = issuer,
+            ClientId = clientId,
+            ClientSecret = clientSecret,
             Scopes =
             {
                 OpenIddictConstants.Scopes.OpenId,
@@ -143,17 +165,18 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     }
     identity.AddClaims(result.Principal.FindAll(Claims.Role));
 
+    // 令牌名称取自 SessionTokens：写入侧（此处）与读取侧（登出撤销）必须同名，否则登出会「看起来成功但没撤」。
     var properties = new AuthenticationProperties();
-    var refreshToken = result.Properties.GetTokenValue("refresh_token");
+    var refreshToken = result.Properties.GetTokenValue(SessionTokens.RefreshTokenName);
     var tokens = new List<AuthenticationToken>();
-    var accessToken = result.Properties.GetTokenValue("access_token");
+    var accessToken = result.Properties.GetTokenValue(SessionTokens.AccessTokenName);
     if (accessToken is not null)
     {
-        tokens.Add(new AuthenticationToken { Name = "access_token", Value = accessToken });
+        tokens.Add(new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = accessToken });
     }
     if (refreshToken is not null)
     {
-        tokens.Add(new AuthenticationToken { Name = "refresh_token", Value = refreshToken });
+        tokens.Add(new AuthenticationToken { Name = SessionTokens.RefreshTokenName, Value = refreshToken });
     }
     properties.StoreTokens(tokens);
 
@@ -161,8 +184,8 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     return Results.Redirect("/me/");
 });
 
-// 退出：清本服务会话 + RP 发起 end-session（IDP 统一单点登出）。
-app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforgery) =>
+// 退出：撤销 Cookie 中的 IDP 令牌 → 清本服务会话 → RP 发起 end-session（IDP 统一单点登出）。
+app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforgery, TokenRevocationClient revocationClient) =>
 {
     try
     {
@@ -172,6 +195,13 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     {
         return Results.BadRequest();
     }
+
+    // 撤销必须排在 SignOutAsync 之前：Cookie 一清，票据里的令牌就再也取不回来了。
+    // 取法与回调侧写入对称（SessionTokens.Read）；未登录或票据无令牌时得到 (null, null)，
+    // 撤销客户端会跳过、不发请求。撤销失败只记 warning，不阻断下面的登出。
+    var (accessToken, refreshToken) = SessionTokens.Read(
+        await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme));
+    await revocationClient.RevokeAsync(accessToken, refreshToken, context.RequestAborted);
 
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.SignOut(
