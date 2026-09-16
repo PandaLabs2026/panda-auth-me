@@ -10,10 +10,10 @@
 #
 # 刻意不排除的路径：
 #   server / website 的 wwwroot/ —— 它们的 wwwroot/brand/** 是**随源码提交**的品牌
-#                   资产，排除会让生产 favicon 404。
+#                   资产，排除会让生产 favicon 404。因此**不能笼统排除 `**/wwwroot/`**：
+#                   属于构建产物的 SPA 输出（me / webadmin 的 wwwroot/<spa>）须按仓
+#                   **定向**排除，不在这里一刀切。me 自身有 SPA 输出，见文件末。
 #   *.md         —— 无收益，徒增风险。
-# 注意：不能笼统排除 `**/wwwroot/`（会误杀上面那份品牌资产），me 的 SPA 输出
-# 一律**定向**排除，见文件末。
 
 **/bin/
 **/obj/
@@ -27,6 +27,21 @@
 **/.zcode/
 releases/
 
+# 敏感文件：各仓 .dockerignore 里的同类规则对工作区根上下文失效，故在此重写一遍
+# （工作区里任何一份 .env / appsettings.*.Local.json / *.user 都不该进入构建上下文
+# 与构建缓存）。
+# ⚠️ 必须带 `**/` 前缀——照抄仓内 .dockerignore 的 `.env` / `*.env` 只匹配工作区根，
+# 而真实会放密钥的位置在工作区**子目录**下（2026-09-16 实测：无前缀时
+# deploy/.env 与 rev-local.env 仍进入上下文；带前缀后 ENV_IN_CTX=0）。
+# `!**/deploy/.env.example` 刻意保留示例文件（它不含密钥）。
+**/*.user
+**/appsettings.Local.json
+**/appsettings.*.Local.json
+**/.env
+**/*.env
+!**/deploy/.env.example
+**/deploy/backups/
+
 # me 的 SPA 构建产物：src/PandaAuth.Me/wwwroot/ 被 .gitignore 忽略、git ls-files 命中 0，
 # 100% 是 `npm run build` 的输出（其内容只有 wwwroot/me/ 一个子树）。
 # 不排除它会漂移进镜像：构建阶段的 COPY panda-auth-me/src/ 会把它带进 /app，
@@ -34,4 +49,3 @@ releases/
 # 于是宿主上残留的旧 assets/*.js 会与新产物共存于 /app/wwwroot/me/assets/。
 # 定向排除本仓路径，别动 server / website 的 wwwroot（品牌资产）。
 panda-auth-me/src/PandaAuth.Me/wwwroot/
-
