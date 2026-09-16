@@ -81,6 +81,14 @@ builder.Services.AddOpenIddict()
     {
         options.AllowAuthorizationCodeFlow();
         options.AllowRefreshTokenFlow();
+
+        // me 是 BFF：令牌保存在 DataProtection 保护的会话 Cookie 中（回调处显式 StoreTokens），
+        // 不使用 OpenIddict 的服务端令牌存储，故无需注册 OpenIddict core 服务。
+        // 不禁用则挑战阶段（生成 state 令牌）会抛 InvalidOperationException
+        // （「The core services must be registered when enabling the OpenIddict client feature」），
+        // 使 /me/login 直接 500——登录入口完全不可用，而非降级。
+        options.DisableTokenStorage();
+
         options.AddEphemeralEncryptionKey();
         options.AddEphemeralSigningKey();
         options.UseSystemNetHttp();
