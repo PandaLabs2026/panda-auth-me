@@ -50,7 +50,10 @@ builder.Services.AddOpenIddict()
             ProviderName = "pandaauth",
             Issuer = new Uri(builder.Configuration["Auth:Issuer"] ?? "http://localhost:9004/"),
             ClientId = builder.Configuration["Auth:ClientId"] ?? "me-web",
-            ClientSecret = builder.Configuration["Auth:ClientSecret"] ?? "me-web-secret-change-me",
+            // 机密客户端密钥失败关闭：缺失/为空即拒绝启动，不回退明文默认值（与 server 侧 Seeder 行为对齐）。
+            ClientSecret = string.IsNullOrWhiteSpace(builder.Configuration["Auth:ClientSecret"])
+                ? throw new InvalidOperationException("缺少 Auth:ClientSecret 配置（me-web 为机密客户端，密钥须由部署环境注入）。")
+                : builder.Configuration["Auth:ClientSecret"]!,
             Scopes =
             {
                 OpenIddictConstants.Scopes.OpenId,
@@ -59,8 +62,9 @@ builder.Services.AddOpenIddict()
                 OpenIddictConstants.Scopes.Roles,
                 OpenIddictConstants.Scopes.OfflineAccess,
             },
-            RedirectUri = new Uri(builder.Configuration["Auth:RedirectUri"] ?? "http://localhost:9007/callback/login/pandaauth"),
-            PostLogoutRedirectUri = new Uri(builder.Configuration["Auth:PostLogoutRedirectUri"] ?? "http://localhost:9007/"),
+            // 实际回调路由为 /me/callback/login/{provider}（Caddy 以 /me 路径反代），默认值须带 /me 前缀；生产值由 compose 注入。
+            RedirectUri = new Uri(builder.Configuration["Auth:RedirectUri"] ?? "http://localhost:9007/me/callback/login/pandaauth"),
+            PostLogoutRedirectUri = new Uri(builder.Configuration["Auth:PostLogoutRedirectUri"] ?? "http://localhost:9007/me/"),
         });
     });
 
