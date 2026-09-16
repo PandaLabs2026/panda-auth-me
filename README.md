@@ -12,7 +12,7 @@ PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 �
 
 [后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览。登录记录、设备、授权管理、改密和 MFA 为占位或规划，不是已可用功能。
 
-本地 [Auth 配置](src/PandaAuth.Me/appsettings.json)的回调缺少实际 `/me/callback/login/{provider}` 中的 `/me` 前缀，Cookie 始终要求 Secure。HTTP 启动与配置默认值不能作为经过验证的登录闭环。生产 compose 中的 Issuer、回调/登出组合也需要一致性验证；不宣称全局所有客户端已经同步登出。
+本地 [Auth 配置](src/PandaAuth.Me/appsettings.json)的默认回调已带 `/me/callback/login/{provider}` 所需的 `/me` 前缀（本地 `http://localhost:9007/me/callback/login/pandaauth`）；生产回调由 compose 注入，端到端登录闭环待生产回归证据。Cookie 始终要求 Secure。HTTP 启动与配置默认值不能作为经过验证的登录闭环。生产 compose 中的 Issuer、回调/登出组合也需要一致性验证；不宣称全局所有客户端已经同步登出。
 
 [Dockerfile](Dockerfile)目前使用本仓上下文，但项目依赖同级 Share；这一构建缺口尚未修复，不能称为已可用自包含镜像构建。
 

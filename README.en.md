@@ -12,7 +12,7 @@ PandaAuth's end-user account center uses a .NET 10 BFF, OpenIddict.Client 7.7.0 
 
 The [backend](src/PandaAuth.Me/Program.cs) contains OIDC challenge/callback, local Cookie, session, antiforgery logout and health entry points. The [frontend](frontend/src/pages/profile.tsx) includes an identity overview. Login history, devices, grants, password changes and MFA are placeholders or plans, not available features.
 
-The local [Auth configuration](src/PandaAuth.Me/appsettings.json) omits the `/me` prefix required by the actual `/me/callback/login/{provider}` route, while Cookies always require Secure. HTTP startup and default settings are not a verified login flow. The production compose Issuer and callback/logout combination also needs consistency validation. Logout is not claimed to clear every client session globally.
+Default redirect URIs in the local [Auth configuration](src/PandaAuth.Me/appsettings.json) now include the `/me` prefix required by the `/me/callback/login/{provider}` route (local: `http://localhost:9007/me/callback/login/pandaauth`); production values are injected via compose — end-to-end login regression evidence is pending. Cookies always require Secure. HTTP startup and default settings are not a verified login flow. The production compose Issuer and callback/logout combination also needs consistency validation. Logout is not claimed to clear every client session globally.
 
 The [Dockerfile](Dockerfile) currently uses only this repository as context despite the sibling Share reference. This build gap remains unresolved; a working self-contained image build is not claimed.
 
