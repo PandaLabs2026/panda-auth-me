@@ -1,9 +1,24 @@
-bin/
-obj/
+# ⚠️ 本文件对当前构建**不生效**：release.sh 对 me 的构建上下文是工作区根
+#    （svc_context → "."），Docker 只读上下文根的 .dockerignore。
+#    实际生效的是同目录的 Dockerfile.dockerignore，本文件是它的**语义镜像**，
+#    仅为「有人改用本仓为上下文构建」时兜底。
+#
+# ⚠️ 构建产物规则必须带 `**/` 前缀：实际产物在 src/PandaAuth.Me/bin|obj，
+#    写成 `bin/` 只匹配仓根的 bin/，等于没排除。
+**/bin/
+**/obj/
+**/TestResults/
 .git/
 .vs/
 .vscode/
 .idea/
-frontend/node_modules/
+**/node_modules/
 *.md
 .zcode/
+
+# 前端构建产物（由 vite 输出，不入库）。
+# 不变式：git ls-files src/PandaAuth.Me/wwwroot 命中数为 0，
+# 该目录 100% 是构建输出。若将来这里混入**随源码提交**的资产
+# （对照 server / website 的 wwwroot/brand/**），必须收窄为只排除
+# src/PandaAuth.Me/wwwroot/me/，否则会把该资产挡在镜像外。
+src/PandaAuth.Me/wwwroot/

@@ -9,9 +9,11 @@
 # bin/obj 让 dotnet restore 复用陈旧产物）。
 #
 # 刻意不排除的路径：
-#   **/wwwroot/  —— server / website 的 wwwroot/brand/** 是随源码提交的品牌资产，
-#                   排除会让生产 favicon 404。
+#   server / website 的 wwwroot/ —— 它们的 wwwroot/brand/** 是**随源码提交**的品牌
+#                   资产，排除会让生产 favicon 404。
 #   *.md         —— 无收益，徒增风险。
+# 注意：不能笼统排除 `**/wwwroot/`（会误杀上面那份品牌资产），me 的 SPA 输出
+# 一律**定向**排除，见文件末。
 
 **/bin/
 **/obj/
@@ -24,3 +26,12 @@
 **/.idea/
 **/.zcode/
 releases/
+
+# me 的 SPA 构建产物：src/PandaAuth.Me/wwwroot/ 被 .gitignore 忽略、git ls-files 命中 0，
+# 100% 是 `npm run build` 的输出（其内容只有 wwwroot/me/ 一个子树）。
+# 不排除它会漂移进镜像：构建阶段的 COPY panda-auth-me/src/ 会把它带进 /app，
+# 而运行阶段的 COPY --from=frontend ./wwwroot/me/ 是**合并**语义（不清陈旧文件），
+# 于是宿主上残留的旧 assets/*.js 会与新产物共存于 /app/wwwroot/me/assets/。
+# 定向排除本仓路径，别动 server / website 的 wwwroot（品牌资产）。
+panda-auth-me/src/PandaAuth.Me/wwwroot/
+
