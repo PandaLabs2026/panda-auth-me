@@ -72,13 +72,9 @@ if (string.IsNullOrWhiteSpace(clientSecret))
     throw new InvalidOperationException("缺少 Auth:ClientSecret 配置（me-web 为机密客户端，密钥须由部署环境注入）。");
 }
 
-// 登出撤销的 HTTP 客户端。超时必须收紧：撤销是登出请求路径上的同步动作，
-// 若沿用 HttpClient 默认的 100 秒，IDP 不可达时用户点一次登出要干等 100 秒。
-builder.Services.AddHttpClient<TokenRevocationClient>(client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Auth:RevocationTimeoutSeconds", 5));
-});
-builder.Services.AddSingleton(new TokenRevocationOptions(issuer, clientId, clientSecret));
+// 登出撤销客户端。超时取值的读取与校验都在 AddTokenRevocation 内、启动期完成——
+// 不能留给 AddHttpClient 的 configure 委托（它只在解析该类型时才执行，见该方法的注释）。
+builder.Services.AddTokenRevocation(builder.Configuration, new TokenRevocationOptions(issuer, clientId, clientSecret));
 
 builder.Services.AddOpenIddict()
     .AddClient(options =>
