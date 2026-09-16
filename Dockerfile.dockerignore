@@ -42,10 +42,18 @@ releases/
 !**/deploy/.env.example
 **/deploy/backups/
 
-# me 的 SPA 构建产物：src/PandaAuth.Me/wwwroot/ 被 .gitignore 忽略、git ls-files 命中 0，
-# 100% 是 `npm run build` 的输出（其内容只有 wwwroot/me/ 一个子树）。
-# 不排除它会漂移进镜像：构建阶段的 COPY panda-auth-me/src/ 会把它带进 /app，
-# 而运行阶段的 COPY --from=frontend ./wwwroot/me/ 是**合并**语义（不清陈旧文件），
+# SPA 构建产物：**本上下文里 me 与 webadmin 各有一份**（上下文＝工作区根），两份都要排。
+# 它们的 src/<Proj>/wwwroot/ 被各自 .gitignore 忽略、git ls-files 命中 0，
+# 100% 是 `npm run build` 的输出。
+# me 那份不排除会漂移进镜像：构建阶段 COPY panda-auth-me/src/ 会把它带进 /app，
+# 而运行阶段 COPY --from=frontend ./wwwroot/me/ 是**合并**语义（不清陈旧文件），
 # 于是宿主上残留的旧 assets/*.js 会与新产物共存于 /app/wwwroot/me/assets/。
-# 定向排除本仓路径，别动 server / website 的 wwwroot（品牌资产）。
+# webadmin 那份进不了 me 的镜像（COPY 不覆盖它），但仍会进上下文与构建缓存，故一并排。
+# 别动 server / website 的 wwwroot（品牌资产，随源码提交）。
 panda-auth-me/src/PandaAuth.Me/wwwroot/
+panda-auth-webadmin/src/PandaAuth.WebAdmin/wwwroot/
+
+# 本地流程账本（.superpowers/，未入库、随机器与每轮任务变化）。与 .zcode/ 同类：
+# 不是源码、任何构建都不读它（release.sh 无引用），留在上下文里只会让上下文传输
+# 与缓存键随各机器的本地状态漂移。
+**/.superpowers/
