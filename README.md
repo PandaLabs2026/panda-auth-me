@@ -18,7 +18,13 @@ PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 �
 
 ## 前置条件与构建运行
 
-需要 .NET SDK，版本选择见本仓 [global.json](global.json)（当前请求 10.0.112，允许 latestFeature roll-forward）。七仓按[工作区布局](https://github.com/PandaLabs2026/panda-auth/blob/main/WORKSPACE.md)同级克隆，跨仓链接需要对应访问权限。以下命令在本仓根目录执行；本轮仅静态核对命令，未执行构建或启动。
+需要 .NET SDK，版本选择见本仓 [global.json](global.json)（当前请求 10.0.112，允许 latestFeature roll-forward）。本仓可脱离私有元仓构建，但需将公开 Share 仓同级克隆。以下命令在本仓根目录执行；本轮仅静态核对命令，未执行构建或启动。
+
+```bash
+git clone https://github.com/PandaLabs2026/panda-auth-me.git
+git clone https://github.com/PandaLabs2026/panda-auth-share.git
+cd panda-auth-me
+```
 
 需要同级 Share、Node 24 与 npm。登录验证还需要可用 IDP、匹配的 me-web 注册与密钥、Issuer、回调/登出地址和本地 HTTPS。先处理上述阻断，不能通过弱化 Cookie 安全要求来把文档写成一键可用。
 
@@ -37,7 +43,7 @@ npm run build
 
 ## Roadmap 与治理
 
-实现目标见[能力矩阵](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/open-source/capabilities.md)与[发布门禁](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/open-source/release-readiness.md)。实际业务需求驱动路线图，社区请求按方向和维护成本评估，不承诺交付。[社区/商业边界](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/open-source/strategy.md)表示能力归属，不代表商业模块已经交付。
+产品级路线图、发行门禁和社区/商业边界在正式公开发行前仍由维护者治理；本 README 只描述可独立复现的 Me 构建与运行边界。
 
 - [安全政策](SECURITY.md)：选定私密报告渠道，启用状态未核验；不公开提交漏洞细节。
 - [贡献指南](CONTRIBUTING.md)：本仓检查与统一贡献规则。

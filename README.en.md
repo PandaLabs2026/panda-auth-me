@@ -18,7 +18,13 @@ The [Dockerfile](Dockerfile) uses the **workspace root** as its build context (t
 
 ## Prerequisites, build and run entry points
 
-Use the .NET SDK selected by [global.json](global.json) (currently 10.0.112 with latestFeature roll-forward). Clone repositories as siblings using the [workspace layout](https://github.com/PandaLabs2026/panda-auth/blob/main/WORKSPACE.md); cross-repository links require access. Commands below run from this repository root. They were statically checked, not executed, in this documentation change.
+Use the .NET SDK selected by [global.json](global.json) (currently 10.0.112 with latestFeature roll-forward). This repository can be built without the private coordination repository, but the public Share repository must be cloned beside it. Commands below run from this repository root. They were statically checked, not executed, in this documentation change.
+
+```bash
+git clone https://github.com/PandaLabs2026/panda-auth-me.git
+git clone https://github.com/PandaLabs2026/panda-auth-share.git
+cd panda-auth-me
+```
 
 Share, Node 24 and npm are required. Login validation also requires a working IDP, matching me-web registration and secret, Issuer, callback/logout URLs and local HTTPS. Resolve the blockers first; do not weaken Cookie requirements to make documentation appear one-command ready.
 
@@ -37,7 +43,7 @@ Self-service features target Phase 2. The current login flow and the build/scan 
 
 ## Roadmap and governance
 
-Implementation targets are tracked in the [capability matrix](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/open-source/capabilities.md) and [release gates](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/open-source/release-readiness.md). Real product needs drive the roadmap; community requests are evaluated without delivery commitments. [Community/commercial boundaries](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/open-source/strategy.md) describe scope, not delivered commercial products.
+Product roadmap, release gates and community/commercial boundaries remain maintainer-governed until a formal public release. This README documents only the independently reproducible Me build and runtime boundary.
 
 - [Security](SECURITY.md): selected private reporting channel, enablement unverified; no public vulnerability details.
 - [Contributing](CONTRIBUTING.md): repository-specific checks and the shared contribution policy.
