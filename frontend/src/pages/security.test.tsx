@@ -70,6 +70,17 @@ describe("SecurityPage", () => {
     expect(screen.getByRole("button", { name: "添加 Passkey" })).toBeDisabled()
   })
 
+  it("sends the user back to login when the IDP answers with an HTML login redirect", async () => {
+    routeFetch([
+      ["/account/mfa/user/status", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
+      ["/account/mfa/user/factors", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
+    ])
+
+    render(<SecurityPage />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/登录状态已失效/)
+  })
+
   it("surfaces the server error when revoking the last active factor fails", async () => {
     routeFetch([
       ["/account/mfa/user/antiforgery", () => jsonResponse({ token: "test-token" })],

@@ -34,7 +34,10 @@ async function errorMessage(response: Response): Promise<string> {
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
-  if (response.status === 401) {
+  // IDP 的 [Authorize] 对未登录请求回 302 到登录页（fetch 会跟随并拿到 200 HTML），
+  // 所以「非 JSON 响应」与 401 一样都意味着会话失效，统一送回 /me/login 重走 OIDC。
+  const isJson = response.headers.get("content-type")?.includes("application/json") ?? false
+  if (response.status === 401 || !isJson) {
     window.location.assign("/me/login")
     throw new Error("登录状态已失效，正在重新登录…")
   }
