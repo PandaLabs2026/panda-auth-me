@@ -6,7 +6,7 @@
 # ⚠️ 一律带 `**/` 前缀：不带前缀的模式只匹配**上下文根**（Docker 的 dockerignore
 #    不会像 gitignore 那样自动递归到任意深度），而实际产物在 src/PandaAuth.Me/bin|obj。
 #
-# 规则清单与 webadmin / website 的 .dockerignore 保持同一套。
+# 规则清单与 admin / website 的 .dockerignore 保持同一套。
 **/bin/
 **/obj/
 **/TestResults/
@@ -20,7 +20,7 @@
 .zcode/
 .superpowers/
 
-# 敏感文件：本仓 .gitignore 早已声明这些路径，为与 webadmin / website 那两份
+# 敏感文件：本仓 .gitignore 早已声明这些路径，为与 admin / website 那两份
 # （在各自仓根上下文下**实际生效**）保持同一套策略而补齐。注意本文件对当前构建
 # 不生效，真正生效的是 Dockerfile.dockerignore —— 那份也已有同样的规则。
 **/*.user
