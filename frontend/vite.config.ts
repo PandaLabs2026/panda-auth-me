@@ -32,6 +32,9 @@ export default defineConfig({
     // 两侧都漏不得，故逐条列出：新增 BFF 路由时这里要同步。
     proxy: {
       "/me/api": "http://localhost:9007",
+      // 安全设置页直连同源调用 IDP 的 /account/mfa/user/*；本地 IDP 在 9004，
+      // dev 经此代理保持同源（Cookie 与 antiforgery 才能成立），生产由 Caddy 同域分流天然满足。
+      "/account": "http://localhost:9004",
       "/me/login": "http://localhost:9007",
       "/me/callback": "http://localhost:9007",
       "/me/healthz": "http://localhost:9007",

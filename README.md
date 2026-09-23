@@ -10,7 +10,7 @@ PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 �
 
 ## 当前实现与限制
 
-[后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览。登录记录、设备、授权管理、改密和 MFA 为占位或规划，不是已可用功能。
+[后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览，[安全设置页](frontend/src/pages/security.tsx)可自助管理 Passkey/TOTP/恢复码（直连同源调用 IDP 的 `/account/mfa/user/*`，写操作经 IDP antiforgery 令牌；代码已具备，生产发布与端到端验收待补）。登录记录、设备、授权管理和改密仍为占位或规划。
 
 本地 [Auth 配置](src/PandaAuth.Me/appsettings.json)的默认回调已带 `/me/callback/login/{provider}` 所需的 `/me` 前缀（本地 `http://localhost:9007/me/callback/login/pandaauth`）；生产回调由 compose 注入（`Auth__Seed__Me__RedirectUris__*` / `__PostLogoutRedirectUris__*`），并由 Server 端 Seeder **upsert** 订正存量白名单。生产登录链路已验证到「IDP 渲染登录页」，并于 2026-09-17 通过脚本化 OIDC 全流程验证 userinfo、刷新、吊销和登出（回调带 `/me` 前缀、PKCE `S256`；篡改回调和登出后 refresh token 重放均有反向对照）。真实浏览器和本地 HTTPS 验收仍待补。Cookie 始终要求 Secure；不宣称全局所有客户端已经同步登出。
 

@@ -76,6 +76,17 @@ export default function ProfilePage() {
               </CardContent>
             </Card>
             <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">安全设置</CardTitle>
+                  <CardDescription>Passkey / TOTP / 恢复码管理</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button variant="outline" size="sm" onClick={() => window.location.assign("/me/security")}>
+                    打开安全设置
+                  </Button>
+                </CardContent>
+              </Card>
               {["登录记录", "设备管理", "授权管理"].map((title) => (
                 <Card key={title}>
                   <CardHeader>
