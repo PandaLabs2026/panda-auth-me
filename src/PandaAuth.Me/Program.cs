@@ -131,6 +131,13 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
     KnownProxies = { IPAddress.Loopback, IPAddress.IPv6Loopback },
 });
 
+// 必须显式声明且排在 UseForwardedHeaders 之后：最小托管会把认证/授权中间件自动插到管线最前，
+// 那样 OpenIddict 客户端在处理 /me/callback 时看到的还是还原前的 http scheme，
+// 与注册的 https RedirectUri 不匹配 → EndpointType=Unknown → 回调 500
+// （2026-09-23 生产真机登录实测；与 admin 仓 Program.cs 的显式模式对齐，另见元仓 engineering-traps）。
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 
