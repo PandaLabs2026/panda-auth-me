@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import QRCode from "qrcode"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,6 +29,7 @@ export default function SecurityPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
   const [totpSetup, setTotpSetup] = useState<{ factorId: string; secret: string; provisioningUri: string } | null>(null)
+  const [totpQrSvg, setTotpQrSvg] = useState<string | null>(null)
   const [totpCode, setTotpCode] = useState("")
 
   const load = useCallback(async () => {
@@ -114,8 +116,15 @@ export default function SecurityPage() {
 
   function onBeginTotp() {
     void run("totp-begin", async () => {
-      setTotpSetup(await mfaApi.totpOptions())
+      const setup = await mfaApi.totpOptions()
+      setTotpSetup(setup)
       setTotpCode("")
+      // SVG 字符串输出（非 canvas）：与 jsdom 测试环境兼容，展示更清晰。
+      try {
+        setTotpQrSvg(await QRCode.toString(setup.provisioningUri, { type: "svg", margin: 1, width: 180 }))
+      } catch {
+        setTotpQrSvg(null)
+      }
     })
   }
 
@@ -124,6 +133,7 @@ export default function SecurityPage() {
     void run("totp-confirm", async () => {
       await mfaApi.totpConfirm(totpSetup.factorId, totpCode)
       setTotpSetup(null)
+      setTotpQrSvg(null)
       setTotpCode("")
       return "TOTP 备用验证已启用。"
     })
@@ -234,8 +244,18 @@ export default function SecurityPage() {
                       </Button>
                     ) : (
                       <>
+                        {totpQrSvg && (
+                          <div className="text-sm">
+                            <p className="mb-1 text-muted-foreground">用认证器 App 扫码录入：</p>
+                            <div
+                              className="inline-block rounded-md bg-white p-2 [&>svg]:block [&>svg]:h-44 [&>svg]:w-44"
+                              // 内容为本地生成的 SVG 二维码（来源：本页 provisioningUri），无不可信输入
+                              dangerouslySetInnerHTML={{ __html: totpQrSvg }}
+                            />
+                          </div>
+                        )}
                         <div className="text-sm">
-                          <p className="mb-1 text-muted-foreground">手动添加密钥：</p>
+                          <p className="mb-1 text-muted-foreground">或手动添加密钥：</p>
                           <code className="break-all rounded bg-muted px-2 py-1">{totpSetup.secret}</code>
                         </div>
                         <div className="space-y-1">
