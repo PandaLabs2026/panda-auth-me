@@ -194,7 +194,10 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     properties.StoreTokens(tokens);
 
     await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity), properties);
-    return Results.Redirect("/me/");
+    // 挑战阶段经 LoginReturnUrl.Sanitize 校验的 RedirectUri 随 state 令牌往返（加密签名，可信），
+    // 在此回跳原始目标；缺失时回退首页。
+    return Results.Redirect(
+        string.IsNullOrEmpty(result.Properties?.RedirectUri) ? LoginReturnUrl.Fallback : result.Properties!.RedirectUri!);
 });
 
 // 退出：撤销 Cookie 中的 IDP 令牌 → 清本服务会话 → RP 发起 end-session（IDP 统一单点登出）。
