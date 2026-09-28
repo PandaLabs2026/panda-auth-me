@@ -28,6 +28,7 @@ builder.Services
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.Path = "/me";
         // 时效：不沿用 ASP.NET Core 默认的「14 天滑动过期」——这枚 Cookie 里装着 refresh_token
         // （IDP 侧有效期 14 天），默认值等于把一枚长期凭据长期留在浏览器上。收紧为
         // 「闲置 8 小时过期、有活动即滑动续期」：这是安全与免重复登录之间的取舍——
@@ -136,6 +137,7 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 // 与注册的 https RedirectUri 不匹配 → EndpointType=Unknown → 回调 500
 // （2026-09-23 生产真机登录实测；与 admin 仓 Program.cs 的显式模式对齐，另见元仓 engineering-traps）。
 app.UseAuthentication();
+app.UseMiddleware<TenantHostContextMiddleware>();
 app.UseAuthorization();
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -159,6 +161,15 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
         return Results.Redirect("/me/");
     }
 
+    if (!TenantHostContext.TryValidate(context, result.Principal, out _))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Results.Content(
+            "<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>403</title>" +
+            "<body style=\"font-family:system-ui;padding:3rem\">租户入口与登录上下文不匹配。</body></html>",
+            "text/html; charset=utf-8");
+    }
+
     var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
     identity.AddClaim(new Claim(Claims.Subject, result.Principal.GetClaim(Claims.Subject) ?? string.Empty));
     var name = result.Principal.GetClaim(Claims.Name);
@@ -175,6 +186,14 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     if (!string.IsNullOrEmpty(nickname))
     {
         identity.AddClaim(new Claim(PandaAuthClaims.Nickname, nickname));
+    }
+    foreach (var claimType in new[] { PandaAuthClaims.TenantId, PandaAuthClaims.TenantHost })
+    {
+        var value = result.Principal.GetClaim(claimType);
+        if (!string.IsNullOrEmpty(value))
+        {
+            identity.AddClaim(new Claim(claimType, value));
+        }
     }
     identity.AddClaims(result.Principal.FindAll(Claims.Role));
 
