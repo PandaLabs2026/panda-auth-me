@@ -114,9 +114,18 @@ builder.Services.AddOpenIddict()
                 OpenIddictConstants.Scopes.OfflineAccess,
             },
             // 实际回调路由为 /me/callback/login/{provider}（Caddy 以 /me 路径反代），默认值须带 /me 前缀；生产值由 compose 注入。
-            RedirectUri = new Uri(builder.Configuration["Auth:RedirectUri"] ?? "http://localhost:9007/me/callback/login/pandaauth"),
-            PostLogoutRedirectUri = new Uri(builder.Configuration["Auth:PostLogoutRedirectUri"] ?? "http://localhost:9007/me/"),
+            RedirectUri = new Uri("me/callback/login/pandaauth", UriKind.Relative),
+            PostLogoutRedirectUri = new Uri("me/", UriKind.Relative),
         });
+
+        options.AddEventHandler<OpenIddictClientEvents.ProcessChallengeContext>(descriptor =>
+            descriptor.UseInlineHandler(context =>
+            {
+                context.Issuer = TenantOidcRouting.ResolveIssuer(
+                    context.Transaction.GetHttpRequest()
+                        ?? throw new InvalidOperationException("OpenIddict challenge is missing the current HTTP request."), issuer);
+                return default;
+            }));
     });
 
 var app = builder.Build();
@@ -236,7 +245,11 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     // 撤销客户端会跳过、不发请求。撤销失败只记 warning，不阻断下面的登出。
     var (accessToken, refreshToken) = SessionTokens.Read(
         await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme));
-    await revocationClient.RevokeAsync(accessToken, refreshToken, context.RequestAborted);
+    await revocationClient.RevokeAsync(
+        accessToken,
+        refreshToken,
+        context.RequestAborted,
+        TenantOidcRouting.ResolveIssuer(context.Request, issuer));
 
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.SignOut(
