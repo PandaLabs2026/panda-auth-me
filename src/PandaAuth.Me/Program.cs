@@ -28,6 +28,7 @@ builder.Services
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.Path = "/me";
         // 时效：不沿用 ASP.NET Core 默认的「14 天滑动过期」——这枚 Cookie 里装着 refresh_token
         // （IDP 侧有效期 14 天），默认值等于把一枚长期凭据长期留在浏览器上。收紧为
         // 「闲置 8 小时过期、有活动即滑动续期」：这是安全与免重复登录之间的取舍——
@@ -113,9 +114,18 @@ builder.Services.AddOpenIddict()
                 OpenIddictConstants.Scopes.OfflineAccess,
             },
             // 实际回调路由为 /me/callback/login/{provider}（Caddy 以 /me 路径反代），默认值须带 /me 前缀；生产值由 compose 注入。
-            RedirectUri = new Uri(builder.Configuration["Auth:RedirectUri"] ?? "http://localhost:9007/me/callback/login/pandaauth"),
-            PostLogoutRedirectUri = new Uri(builder.Configuration["Auth:PostLogoutRedirectUri"] ?? "http://localhost:9007/me/"),
+            RedirectUri = new Uri("me/callback/login/pandaauth", UriKind.Relative),
+            PostLogoutRedirectUri = new Uri("me/", UriKind.Relative),
         });
+
+        options.AddEventHandler<OpenIddictClientEvents.ProcessChallengeContext>(descriptor =>
+            descriptor.UseInlineHandler(context =>
+            {
+                context.Issuer = TenantOidcRouting.ResolveIssuer(
+                    context.Transaction.GetHttpRequest()
+                        ?? throw new InvalidOperationException("OpenIddict challenge is missing the current HTTP request."), issuer);
+                return default;
+            }));
     });
 
 var app = builder.Build();
@@ -136,6 +146,7 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 // 与注册的 https RedirectUri 不匹配 → EndpointType=Unknown → 回调 500
 // （2026-09-23 生产真机登录实测；与 admin 仓 Program.cs 的显式模式对齐，另见元仓 engineering-traps）。
 app.UseAuthentication();
+app.UseMiddleware<TenantHostContextMiddleware>();
 app.UseAuthorization();
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -159,6 +170,15 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
         return Results.Redirect("/me/");
     }
 
+    if (!TenantHostContext.TryValidate(context, result.Principal, out _))
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Results.Content(
+            "<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>403</title>" +
+            "<body style=\"font-family:system-ui;padding:3rem\">租户入口与登录上下文不匹配。</body></html>",
+            "text/html; charset=utf-8");
+    }
+
     var identity = new ClaimsIdentity(CookieAuthenticationDefaults.AuthenticationScheme);
     identity.AddClaim(new Claim(Claims.Subject, result.Principal.GetClaim(Claims.Subject) ?? string.Empty));
     var name = result.Principal.GetClaim(Claims.Name);
@@ -175,6 +195,14 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     if (!string.IsNullOrEmpty(nickname))
     {
         identity.AddClaim(new Claim(PandaAuthClaims.Nickname, nickname));
+    }
+    foreach (var claimType in new[] { PandaAuthClaims.TenantId, PandaAuthClaims.TenantHost })
+    {
+        var value = result.Principal.GetClaim(claimType);
+        if (!string.IsNullOrEmpty(value))
+        {
+            identity.AddClaim(new Claim(claimType, value));
+        }
     }
     identity.AddClaims(result.Principal.FindAll(Claims.Role));
 
@@ -217,7 +245,11 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     // 撤销客户端会跳过、不发请求。撤销失败只记 warning，不阻断下面的登出。
     var (accessToken, refreshToken) = SessionTokens.Read(
         await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme));
-    await revocationClient.RevokeAsync(accessToken, refreshToken, context.RequestAborted);
+    await revocationClient.RevokeAsync(
+        accessToken,
+        refreshToken,
+        context.RequestAborted,
+        TenantOidcRouting.ResolveIssuer(context.Request, issuer));
 
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.SignOut(
