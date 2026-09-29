@@ -74,6 +74,8 @@ export const mfaApi = {
   totpOptions: () =>
     post<{ factorId: string; secret: string; provisioningUri: string }>("totp/options"),
   totpConfirm: (factorId: string, code: string) => post<{ status: string }>("totp/confirm", { factorId, code }),
+  // step-up 断言（打开 5 分钟敏感操作窗口）：仅有 TOTP 因子的用户此前无法完成 step-up（2026-09-30 缺口收口）。
+  totpAssert: (code: string) => post<{ status: string }>("totp/assert", { code }),
 
   recoveryCodes: () => post<string[]>("recovery-codes"),
   revokeFactor: (factorId: string) => post<{ status: string }>("factors/revoke", { factorId }),

@@ -95,4 +95,47 @@ describe("SecurityPage", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Cannot remove the last active factor/)
   })
+
+  // 2026-09-30 缺口收口：仅有 TOTP 因子的用户此前无法完成 step-up（旧 UI 只提供 Passkey 断言且按钮
+  // 在浏览器支持时一律显示，TOTP-only 用户点击必然得到服务端错误）。
+  it("lets a totp-only user step up with an authenticator code and hides the passkey step-up entry", async () => {
+    routeFetch([
+      ["/account/mfa/user/antiforgery", () => jsonResponse({ token: "test-token" })],
+      ["/account/mfa/user/totp/assert", () => jsonResponse({ status: "ok" })],
+      [
+        "/account/mfa/user/status",
+        () =>
+          jsonResponse({
+            hasActiveFactor: true,
+            requiresReconfiguration: false,
+            recoveryCodeCount: 10,
+            activePasskeyCount: 0,
+          }),
+      ],
+      [
+        "/account/mfa/user/factors",
+        () =>
+          jsonResponse([
+            {
+              id: "f2",
+              type: "totp",
+              friendlyName: null,
+              createdAt: "2026-09-23T08:00:00+00:00",
+              lastUsedAt: null,
+            },
+          ]),
+      ],
+    ])
+
+    render(<SecurityPage />)
+    await screen.findByText("TOTP 验证器")
+
+    // 没有 Passkey 因子：不显示 Passkey step-up 入口（有因子才提供对应断言路径）。
+    expect(screen.queryByRole("button", { name: "先验证已有因子" })).not.toBeInTheDocument()
+
+    await userEvent.type(screen.getByLabelText("输入认证器 6 位验证码"), "123456")
+    await userEvent.click(screen.getByRole("button", { name: "验证 TOTP" }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/验证通过/)
+  })
 })
