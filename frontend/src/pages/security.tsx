@@ -31,6 +31,7 @@ export default function SecurityPage() {
   const [totpSetup, setTotpSetup] = useState<{ factorId: string; secret: string; provisioningUri: string } | null>(null)
   const [totpQrSvg, setTotpQrSvg] = useState<string | null>(null)
   const [totpCode, setTotpCode] = useState("")
+  const [totpAssertCode, setTotpAssertCode] = useState("")
 
   const load = useCallback(async () => {
     try {
@@ -84,6 +85,12 @@ export default function SecurityPage() {
     return "验证通过：5 分钟内可以继续敏感操作。"
   }
 
+  async function stepUpWithTotp(): Promise<string> {
+    await mfaApi.totpAssert(totpAssertCode)
+    setTotpAssertCode("")
+    return "验证通过：5 分钟内可以继续敏感操作。"
+  }
+
   function onAddPasskey() {
     if (!passkeySupported) {
       setError("此浏览器不支持 Passkey，请使用系统自带的验证器（如 Windows Hello）。")
@@ -97,7 +104,7 @@ export default function SecurityPage() {
         if (message.startsWith("当前条件不满足")) {
           throw new Error(
             status?.hasActiveFactor
-              ? "添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口），请点击「先验证已有因子」。"
+              ? "添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口）：请用 Passkey 或 TOTP 完成验证。"
               : message,
           )
         }
@@ -107,11 +114,11 @@ export default function SecurityPage() {
   }
 
   function onStepUp() {
-    if (!passkeySupported) {
-      setError("此浏览器不支持 Passkey，请使用系统自带的验证器（如 Windows Hello）。")
-      return
-    }
     void run("step-up", stepUpWithPasskey)
+  }
+
+  function onStepUpWithTotp() {
+    void run("step-up-totp", stepUpWithTotp)
   }
 
   function onBeginTotp() {
@@ -155,6 +162,7 @@ export default function SecurityPage() {
   }
 
   const hasTotp = factors.some((factor) => factor.type === "totp")
+  const hasPasskey = factors.some((factor) => factor.type === "passkey")
 
   return (
     <div className="min-h-screen">
@@ -214,7 +222,7 @@ export default function SecurityPage() {
                   <Button size="sm" disabled={!passkeySupported || busy !== null} onClick={onAddPasskey}>
                     {busy === "enroll-passkey" ? "注册中…" : "添加 Passkey"}
                   </Button>
-                  {status?.hasActiveFactor && (
+                  {status?.hasActiveFactor && hasPasskey && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -236,6 +244,32 @@ export default function SecurityPage() {
                       : "使用认证器 App（如 Microsoft Authenticator）扫描或手动录入密钥。"}
                   </CardDescription>
                 </CardHeader>
+                {hasTotp && (
+                  <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      敏感操作前可用 TOTP 验证码完成验证（打开 5 分钟窗口）。
+                    </p>
+                    <div className="space-y-1">
+                      <Label htmlFor="totp-assert-code">输入认证器 6 位验证码</Label>
+                      <Input
+                        id="totp-assert-code"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        value={totpAssertCode}
+                        onChange={(event) => setTotpAssertCode(event.target.value)}
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy !== null || totpAssertCode.length !== 6}
+                      onClick={onStepUpWithTotp}
+                    >
+                      {busy === "step-up-totp" ? "验证中…" : "验证 TOTP"}
+                    </Button>
+                  </CardContent>
+                )}
                 {!hasTotp && (
                   <CardContent className="space-y-3">
                     {!totpSetup ? (
