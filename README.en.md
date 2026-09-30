@@ -39,7 +39,7 @@ npm run build
 
 Frontend output goes to BFF `wwwroot/me`. The backend entry point is `dotnet run --project src/PandaAuth.Me` from the repository root; current development binding is http://localhost:9007, health path `/me/healthz`. Run `npm run dev` in `frontend` for port 5172; the dev server proxies only the routes the BFF actually owns (`/me/api`, `/me/login`, `/me/callback`, `/me/healthz`) to 9007 and leaves the rest of `/me/*` (including `@vite/client` and source files) to Vite — proxying the whole `/me` prefix breaks HMR, the module graph and source debugging. Full local run instructions await callback/TLS/Issuer validation.
 
-Self-service features target Phase 2; administrator and cross-client safety boundaries are enforced on the Server side.
+Self-service profile and MFA factor management (TOTP, Passkeys, recovery codes) are implemented; administrator and cross-client safety boundaries are enforced on the Server side.
 
 ## Roadmap and governance
 
