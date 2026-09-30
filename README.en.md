@@ -18,7 +18,7 @@ The [Dockerfile](Dockerfile) uses the **workspace root** as its build context (t
 
 ## Prerequisites, build and run entry points
 
-Use the .NET SDK selected by [global.json](global.json) (currently 10.0.112 with latestFeature roll-forward). This repository can be built without the private coordination repository, but the public Share repository must be cloned beside it. Commands below run from this repository root. They were statically checked, not executed, in this documentation change.
+Use the .NET SDK selected by [global.json](global.json) (currently 10.0.112 with latestFeature roll-forward). This repository can be built without the private coordination repository, but the public Share repository must be cloned beside it. Commands below run from this repository root.
 
 ```bash
 git clone https://github.com/PandaLabs2026/panda-auth-me.git
