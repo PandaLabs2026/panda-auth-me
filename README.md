@@ -2,7 +2,7 @@
 
 **PandaAuth by PandaLabs** · [English](README.en.md)
 
-> 研发阶段，尚无正式受支持发行版；接入采用邀请或申请口径。已有实现不等于已完成发行验证。
+> PandaAuth 套件当前为 **Community Preview 0.2.0-preview.1**：已部署生产、面向早期社区试用；稳定版 Community Release 1.0.0 尚未发布。接入采用邀请或申请口径。
 
 ## 职责与边界
 
