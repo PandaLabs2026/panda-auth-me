@@ -39,7 +39,7 @@ npm run build
 
 前端输出到 BFF `wwwroot/me`。后端入口是在本仓根目录执行 `dotnet run --project src/PandaAuth.Me`；当前开发监听 http://localhost:9007，健康路径 `/me/healthz`。前端在 `frontend` 执行 `npm run dev`，端口 5172；dev server 只把 BFF 实际拥有的路由（`/me/api`、`/me/login`、`/me/callback`、`/me/healthz`）代理到 9007，其余 `/me/*`（含 `@vite/client` 与源码）仍由 Vite 服务——代理整个 `/me` 前缀会把 HMR、模块图与源码调试一并打坏。完整本地运行步骤待回调/TLS/Issuer 配置验证后提供。
 
-自助能力为 Phase 2 目标；当前登录闭环与构建/扫描门禁分别跟踪在 G04/G09，管理员和跨客户端安全边界见 G06。
+自助能力为 Phase 2 目标；管理员和跨客户端安全边界由 Server 侧强制执行。
 
 ## Roadmap 与治理
 
