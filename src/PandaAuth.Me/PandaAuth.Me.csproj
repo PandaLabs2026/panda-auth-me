@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="PandaAuth.Me.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="OpenIddict.AspNetCore" />
     <PackageReference Include="OpenIddict.Client.SystemNetHttp" />
   </ItemGroup>
