@@ -124,7 +124,9 @@ builder.Services.AddOpenIddict()
             },
             // 实际回调路由为 /me/callback/login/{provider}（Caddy 以 /me 路径反代），默认值须带 /me 前缀；生产值由 compose 注入。
             RedirectUri = new Uri("me/callback/login/pandaauth", UriKind.Relative),
-            PostLogoutRedirectUri = new Uri("me/", UriKind.Relative),
+            // post-logout 回调必须是专用路径：/me/ 本身会被 OpenIddict 客户端拦截做登出回调提取，
+// 无参数的普通导航也被当作无 state 的回调以 400 拒绝（2026-10-01 实测，t0000 同病）。
+PostLogoutRedirectUri = new Uri("me/callback/logout/pandaauth", UriKind.Relative),
         });
 
         options.AddEventHandler<OpenIddictClientEvents.ProcessChallengeContext>(descriptor =>
