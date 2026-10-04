@@ -1,24 +1,26 @@
 # panda-auth-me
 
-**PandaAuth by PandaLabs** · [English](README.en.md)
+**PandaAuth by PandaLabs** · [简体中文](README.zh-CN.md)
 
-> PandaAuth 套件当前为 **Community Preview 0.2.0-preview.1**：已部署生产、面向早期社区试用；稳定版 Community Release 1.0.0 尚未发布。接入采用邀请或申请口径。
+**Official page [pandalabs.cc](https://pandalabs.cc/products/panda-auth/)** · Chinese site [pandalabs.cn](https://pandalabs.cn/products/panda-auth/) · [PandaLabs product suite](https://pandalabs.cc/products/)
 
-## 职责与边界
+> The PandaAuth suite is currently in **Community Preview 0.2.0-preview.1** — deployed in production and open to early community users. The stable Community Release 1.0.0 has not shipped yet. Access is by invitation or request.
 
-PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 与 React 19 前端组成。引用同级 [panda-auth-share](https://github.com/PandaLabs2026/panda-auth-share)，作为 Server 的第一方客户端 `me-web`，生产路径为 `/me`，监听 127.0.0.1:9007。
+## Responsibility and boundaries
 
-## 当前实现与限制
+PandaAuth's end-user account center uses a .NET 10 BFF, OpenIddict.Client 7.7.0 and React 19. It references sibling [panda-auth-share](https://github.com/PandaLabs2026/panda-auth-share) and acts as Server's first-party `me-web` client. Production path: `/me`; binding: 127.0.0.1:9007.
 
-[后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览，[安全设置页](frontend/src/pages/security.tsx)可自助管理 Passkey/TOTP/恢复码（直连同源调用 IDP 的 `/account/mfa/user/*`，写操作经 IDP antiforgery 令牌；代码已具备，生产发布与端到端验收待补）。登录记录、设备、授权管理和改密仍为占位或规划。
+## Current implementation and limitations
 
-本地 [Auth 配置](src/PandaAuth.Me/appsettings.json)的默认回调已带 `/me/callback/login/{provider}` 所需的 `/me` 前缀（本地 `http://localhost:9007/me/callback/login/pandaauth`）；生产回调由 compose 注入（`Auth__Seed__Me__RedirectUris__*` / `__PostLogoutRedirectUris__*`），并由 Server 端 Seeder **upsert** 订正存量白名单。生产登录链路已验证到「IDP 渲染登录页」，并于 2026-09-17 通过脚本化 OIDC 全流程验证 userinfo、刷新、吊销和登出（回调带 `/me` 前缀、PKCE `S256`；篡改回调和登出后 refresh token 重放均有反向对照）。真实浏览器和本地 HTTPS 验收仍待补。Cookie 始终要求 Secure；不宣称全局所有客户端已经同步登出。
+The [backend](src/PandaAuth.Me/Program.cs) contains OIDC challenge/callback, local Cookie, session, antiforgery logout and health entry points. The [frontend](frontend/src/pages/profile.tsx) includes an identity overview, and the [security settings page](frontend/src/pages/security.tsx) lets users self-manage Passkey/TOTP/recovery codes (same-origin calls to the IDP's `/account/mfa/user/*` with IDP antiforgery tokens; code complete, production release and end-to-end acceptance pending). Login history, devices, grants and password changes remain placeholders or plans.
 
-[Dockerfile](Dockerfile)以**工作区根目录**为构建上下文（项目依赖同级 Share，所以它不是「本仓上下文的自包含构建」；上下文过滤走同目录的 `Dockerfile.dockerignore`，本仓的 `.dockerignore` 对根上下文不生效）。运行阶段以非 root 的 `app` 用户（uid 1654）启动、带镜像级 `HEALTHCHECK`，并在镜像内预建、`chown` 了 DataProtection 密钥目录（该目录缺失或属 root 时应用会失败关闭）。该上下文已在生产构建出实际运行的 me 镜像。
+Default redirect URIs in the local [Auth configuration](src/PandaAuth.Me/appsettings.json) now include the `/me` prefix required by the `/me/callback/login/{provider}` route (local: `http://localhost:9007/me/callback/login/pandaauth`); production values are injected via compose (`Auth__Seed__Me__RedirectUris__*` / `__PostLogoutRedirectUris__*`), and the Server-side Seeder **upserts** existing whitelists to match. The production login flow is verified up to “the IDP renders the login page”, and a scripted OIDC flow verified userinfo, refresh, revocation and logout on 2026-09-17 (the callback carries the `/me` prefix and PKCE `S256`; tampered callback and post-logout refresh-token replay have negative evidence). Real-browser and local-HTTPS acceptance remain outstanding. Cookies always require Secure; logout is not claimed to clear every client session globally.
 
-## 前置条件与构建运行
+The [Dockerfile](Dockerfile) uses the **workspace root** as its build context (the project references sibling Share, so it is not a self-contained build from this repository's own context; context filtering comes from the sibling `Dockerfile.dockerignore`, and this repository's `.dockerignore` does not apply to a workspace-root context). The runtime stage starts as the non-root `app` user (uid 1654), carries an image-level `HEALTHCHECK`, and pre-creates plus `chown`s the DataProtection key directory (a missing or root-owned directory makes the application fail closed). That context has produced the me image actually running in production.
 
-需要 .NET SDK，版本选择见本仓 [global.json](global.json)（当前请求 10.0.112，允许 latestFeature roll-forward）。本仓可脱离私有元仓构建，但需将公开 Share 仓同级克隆。以下命令在本仓根目录执行。
+## Prerequisites, build and run entry points
+
+Use the .NET SDK selected by [global.json](global.json) (currently 10.0.112 with latestFeature roll-forward). This repository can be built without the private coordination repository, but the public Share repository must be cloned beside it. Commands below run from this repository root.
 
 ```bash
 git clone https://github.com/PandaLabs2026/panda-auth-me.git
@@ -26,9 +28,9 @@ git clone https://github.com/PandaLabs2026/panda-auth-share.git
 cd panda-auth-me
 ```
 
-需要同级 Share、Node 24 与 npm。登录验证还需要可用 IDP、匹配的 me-web 注册与密钥、Issuer、回调/登出地址和本地 HTTPS。先处理上述阻断，不能通过弱化 Cookie 安全要求来把文档写成一键可用。
+Share, Node 24 and npm are required. Login validation also requires a working IDP, matching me-web registration and secret, Issuer, callback/logout URLs and local HTTPS. Resolve the blockers first; do not weaken Cookie requirements to make documentation appear one-command ready.
 
-源码构建入口（不代表 OIDC 登录验证通过）：
+Source build entry points (not proof of a working OIDC login):
 
 ```bash
 dotnet build PandaAuth.Me.slnx
@@ -37,14 +39,14 @@ npm ci
 npm run build
 ```
 
-前端输出到 BFF `wwwroot/me`。后端入口是在本仓根目录执行 `dotnet run --project src/PandaAuth.Me`；当前开发监听 http://localhost:9007，健康路径 `/me/healthz`。前端在 `frontend` 执行 `npm run dev`，端口 5172；dev server 只把 BFF 实际拥有的路由（`/me/api`、`/me/login`、`/me/callback`、`/me/healthz`）代理到 9007，其余 `/me/*`（含 `@vite/client` 与源码）仍由 Vite 服务——代理整个 `/me` 前缀会把 HMR、模块图与源码调试一并打坏。完整本地运行步骤待回调/TLS/Issuer 配置验证后提供。
+Frontend output goes to BFF `wwwroot/me`. The backend entry point is `dotnet run --project src/PandaAuth.Me` from the repository root; current development binding is http://localhost:9007, health path `/me/healthz`. Run `npm run dev` in `frontend` for port 5172; the dev server proxies only the routes the BFF actually owns (`/me/api`, `/me/login`, `/me/callback`, `/me/healthz`) to 9007 and leaves the rest of `/me/*` (including `@vite/client` and source files) to Vite — proxying the whole `/me` prefix breaks HMR, the module graph and source debugging. Full local run instructions await callback/TLS/Issuer validation.
 
-个人资料与 MFA 因子自助管理（TOTP、Passkey、恢复码）已实现；管理员和跨客户端安全边界由 Server 侧强制执行。
+Self-service profile and MFA factor management (TOTP, Passkeys, recovery codes) are implemented; administrator and cross-client safety boundaries are enforced on the Server side.
 
-## Roadmap 与治理
+## Roadmap and governance
 
-产品级路线图、发行门禁和社区/商业边界在正式公开发行前仍由维护者治理；本 README 只描述可独立复现的 Me 构建与运行边界。
+Product roadmap, release gates and community/commercial boundaries remain maintainer-governed until a formal public release. This README documents only the independently reproducible Me build and runtime boundary.
 
-- [安全政策](SECURITY.md)：选定私密报告渠道，启用状态未核验；不公开提交漏洞细节。
-- [贡献指南](CONTRIBUTING.md)：本仓检查与统一贡献规则。
-- [MIT License](LICENSE)：适用于自有代码和文档，具体范围见[许可说明](LICENSING.md)；第三方许可仍适用，品牌图片除外。
+- [Security](SECURITY.md): selected private reporting channel, enablement unverified; no public vulnerability details.
+- [Contributing](CONTRIBUTING.md): repository-specific checks and the shared contribution policy.
+- [MIT License](LICENSE) for project-owned code/documentation, subject to [license scope](LICENSING.md); third-party terms remain applicable and brand images are excluded.
