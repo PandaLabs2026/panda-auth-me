@@ -300,7 +300,7 @@ app.MapHealthChecks("/me/healthz");
 
 // SPA 回退：/me 下非文件路径一律返回 index.html。
 // SPA 入口 no-store：部署轮换后浏览器不得沿用旧前端（带哈希的静态资源仍可长缓存）。
-app.MapFallbackToFile("/me/{*path:nonfile}", "me/index.html", new Microsoft.AspNetCore.StaticFiles.StaticFileOptions
+app.MapFallbackToFile("/me/{*path:nonfile}", "me/index.html", new Microsoft.AspNetCore.Builder.StaticFileOptions
 {
     OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-store"
 });
