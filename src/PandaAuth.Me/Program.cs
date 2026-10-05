@@ -24,7 +24,13 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     TenantForwardedHeaders.Configure(options, builder.Configuration);
 });
 
-builder.Services.AddAntiforgery(options => options.HeaderName = "X-XSRF-Token");
+// 防伪 Cookie 恒 Secure：默认 SameAsRequest 在 http 请求下会降级为明文 Cookie，
+// 与上方会话 Cookie 的 Always 约束保持一致（与 server/admin 仓同款）。
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-XSRF-Token";
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+});
 builder.Services
     .AddAuthentication(options =>
     {
@@ -122,7 +128,8 @@ builder.Services.AddOpenIddict()
                 OpenIddictConstants.Scopes.Roles,
                 OpenIddictConstants.Scopes.OfflineAccess,
             },
-            // 实际回调路由为 /me/callback/login/{provider}（Caddy 以 /me 路径反代），默认值须带 /me 前缀；生产值由 compose 注入。
+            // 实际回调路由为 /me/callback/login/{provider}（Caddy 以 /me 路径反代），默认值须带 /me 前缀。
+            // 相对 URI 按请求的 host/scheme 解析，开发与生产同值可用；此处为硬编码，不存在按环境注入的通路。
             RedirectUri = new Uri("me/callback/login/pandaauth", UriKind.Relative),
             // post-logout 回调必须是专用路径：/me/ 本身会被 OpenIddict 客户端拦截做登出回调提取，
 // 无参数的普通导航也被当作无 state 的回调以 400 拒绝（2026-10-01 实测，t0000 同病）。
