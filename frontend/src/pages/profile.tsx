@@ -60,7 +60,7 @@ export default function ProfilePage() {
                   href={session.portalHomeUrl}
                   className="text-sm text-primary no-underline hover:underline hover:underline-offset-2"
                 >
-                  返回工作台
+                  返回熊猫门户
                 </a>
               )}
               <Button variant="outline" size="sm" onClick={logout}>
