@@ -24,12 +24,20 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     TenantForwardedHeaders.Configure(options, builder.Configuration);
 });
 
-// 防伪 Cookie 恒 Secure：默认 SameAsRequest 在 http 请求下会降级为明文 Cookie，
-// 与上方会话 Cookie 的 Always 约束保持一致（与 server/admin 仓同款）。
+// 防伪 Cookie 恒 Secure（生产），与上方会话 Cookie 的 Always 约束一致：防伪令牌不落明文。
+// 但 Antiforgery 对 Always 是服务端 fail-closed——非 SSL 请求直接抛 InvalidOperationException
+// （DefaultAntiforgery.CheckSSLConfig），/me/api/antiforgery 与 /me/api/logout 都会 500，
+// 且后者不会被 AntiforgeryValidationException 的 catch 接住。本地开发是 launchSettings 直连
+// http://localhost:9007（无 TLS），无条件 Always 会打断登出链路，故仅非 Development 环境收紧；
+// 生产容器为 ASPNETCORE_ENVIRONMENT=Production，且经 Caddy TLS 反代（X-Forwarded-Proto 还原 https）。
+// 行为由 AntiforgeryCookieSecurePolicyTests 钉住。
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = "X-XSRF-Token";
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    if (!builder.Environment.IsDevelopment())
+    {
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    }
 });
 builder.Services
     .AddAuthentication(options =>
@@ -297,3 +305,7 @@ app.MapHealthChecks("/me/healthz");
 app.MapFallbackToFile("/me/{*path:nonfile}", "me/index.html");
 
 app.Run();
+
+// 供测试工程以 WebApplicationFactory<Program> 启动真实应用（top-level statements 生成的
+// Program 默认 internal）。必须位于 app.Run() 之后：类型声明之后的顶层语句是编译错误。
+public partial class Program { }

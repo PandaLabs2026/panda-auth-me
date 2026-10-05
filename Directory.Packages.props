@@ -12,6 +12,8 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <!-- 行为测试用：以 WebApplicationFactory 启动真实 Program.cs（server 仓测试无此形态，无对齐对象） -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
   </ItemGroup>
 
 </Project>
