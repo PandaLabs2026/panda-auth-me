@@ -50,3 +50,27 @@ Product roadmap, release gates and community/commercial boundaries remain mainta
 - [Security](SECURITY.md): selected private reporting channel, enablement unverified; no public vulnerability details.
 - [Contributing](CONTRIBUTING.md): repository-specific checks and the shared contribution policy.
 - [MIT License](LICENSE) for project-owned code/documentation, subject to [license scope](LICENSING.md); third-party terms remain applicable and brand images are excluded.
+
+## Production state keys and bridge proxy
+
+Non-development environments require an existing `Auth:DataProtectionKeyPath` directory.
+The service stores separate OpenIddict state credentials in `client-keys.json` in that directory:
+version 1, A256KW/A256CBC-HS512 encryption and RSA-2048/RS256 signing. DataProtection still
+protects session cookies and antiforgery tokens with application name `PandaAuth.Me`.
+The first key file is published atomically without overwriting an existing file; concurrent
+creators read the winner. On Unix a newly created file has mode 0600. Mount and back up the
+whole private directory, retain its ownership for the container user, and never log its contents.
+Corruption or unsupported material stops startup; it does not silently rotate credentials.
+Development without a directory retains ephemeral state keys and logs one startup warning.
+
+The first upgrade from ephemeral keys invalidates in-flight login state once; users can restart
+login. Later restarts with the same directory preserve state verification and existing session
+cookies. Rolling back to an ephemeral-key image again invalidates in-flight state; do not remove
+the volume or key file. Atomic initialization is tested, but a multi-instance deployment also
+needs a shared DataProtection key ring and filesystem with atomic, no-overwrite rename semantics.
+The restart tests use an offline token stub; they do not claim production IDP login acceptance.
+
+The default production bridge stack must set both `PANDA_AUTH_TENANT_NETWORK_MODE=bridge`
+and `PANDA_AUTH_TRUSTED_PROXY` to the allocation's exact IPv4 gateway. Same-subnet peers and
+loopback cannot supply trusted forwarded headers in bridge mode. Production ports and release
+commands are maintained in the sibling meta repository's `deploy/README.md`.

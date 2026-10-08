@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Client;
 using OpenIddict.Client.AspNetCore;
@@ -61,11 +62,14 @@ builder.Services
         options.SlidingExpiration = true;
     });
 
-// 会话 Cookie、防伪令牌与 OpenIddict 客户端状态均由 DataProtection 保护。
+// 会话 Cookie、防伪令牌由 DataProtection 保护；OIDC state 使用独立客户端密钥。
 // Auth:DataProtectionKeyPath 非空时持久化密钥环（生产由 compose 注入卷路径），
 // 容器重建后既有登录态不失效；默认空串 = 临时密钥，仅限开发环境。
 // 应用名固定为 PandaAuth.Me：不同服务不共用密钥环，各服务的卷本就独立。
 var dataProtectionKeyPath = builder.Configuration["Auth:DataProtectionKeyPath"];
+(EncryptingCredentials Encryption, SigningCredentials Signing)? clientCredentials = null;
+if (string.IsNullOrWhiteSpace(dataProtectionKeyPath) && !builder.Environment.IsDevelopment())
+    throw new InvalidOperationException("非开发环境必须配置 Auth:DataProtectionKeyPath 持久目录。");
 if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
 {
     // 路径必须已存在：生产由 compose 命名卷挂载保证；不存在即说明「配置路径与卷挂载点不一致」，
@@ -81,6 +85,7 @@ if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
         .AddDataProtection()
         .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyPath))
         .SetApplicationName("PandaAuth.Me");
+    clientCredentials = ClientKeys.LoadOrCreate(dataProtectionKeyPath);
 }
 
 builder.Services.AddAuthorization();
@@ -124,8 +129,16 @@ builder.Services.AddOpenIddict()
         // 使 /me/login 直接 500——登录入口完全不可用，而非降级。
         options.DisableTokenStorage();
 
-        options.AddEphemeralEncryptionKey();
-        options.AddEphemeralSigningKey();
+        if (clientCredentials is { } credentials)
+        {
+            options.AddEncryptionCredentials(credentials.Encryption);
+            options.AddSigningCredentials(credentials.Signing);
+        }
+        else
+        {
+            options.AddEphemeralEncryptionKey();
+            options.AddEphemeralSigningKey();
+        }
         options.UseSystemNetHttp();
         options.UseAspNetCore()
             .EnableRedirectionEndpointPassthrough()
@@ -166,6 +179,8 @@ PostLogoutRedirectUri = new Uri("me/callback/logout/pandaauth", UriKind.Relative
     });
 
 var app = builder.Build();
+if (clientCredentials is null)
+    app.Logger.LogWarning("Development 使用临时客户端密钥；重启会使在途登录 state 失效。");
 
 // Legacy host-network runtime trusts loopback; tenant bridge runtime trusts only its exact Docker gateway.
 app.UseForwardedHeaders(app.Services.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value);

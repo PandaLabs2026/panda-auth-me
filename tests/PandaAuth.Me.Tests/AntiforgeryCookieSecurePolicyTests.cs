@@ -65,7 +65,12 @@ public class AntiforgeryCookieSecurePolicyTests
     [Fact]
     public void NonDevelopment_AntiforgeryCookieSecurePolicy_IsAlways()
     {
-        using var factory = Factory("Production");
+        var directory = Path.Combine(Path.GetTempPath(), "panda-me-policy-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+        using var factory = Factory("Production").WithWebHostBuilder(builder =>
+            builder.UseSetting("Auth:DataProtectionKeyPath", directory));
 
         var securePolicy = factory.Services
             .GetRequiredService<IOptions<AntiforgeryOptions>>()
@@ -74,5 +79,7 @@ public class AntiforgeryCookieSecurePolicyTests
         // 生产经 Caddy TLS 反代（X-Forwarded-Proto 还原 https），Always 不打断请求；
         // 松回 SameAsRequest 会让防伪令牌在 http 降级路径下落明文 Cookie。
         Assert.Equal(CookieSecurePolicy.Always, securePolicy);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 }
