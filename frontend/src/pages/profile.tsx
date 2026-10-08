@@ -9,6 +9,7 @@ type Session = {
   email: string | null
   nickname: string | null
   roles: string[]
+  portalHomeUrl: string | null
 }
 
 /**
@@ -53,9 +54,19 @@ export default function ProfilePage() {
             PandaAuth 账户中心
           </span>
           {session && (
-            <Button variant="outline" size="sm" onClick={logout}>
-              退出登录
-            </Button>
+            <div className="flex items-center gap-2">
+              {session.portalHomeUrl && (
+                <a
+                  href={session.portalHomeUrl}
+                  className="text-sm text-primary no-underline hover:underline hover:underline-offset-2"
+                >
+                  返回熊猫门户
+                </a>
+              )}
+              <Button variant="outline" size="sm" onClick={logout}>
+                退出登录
+              </Button>
+            </div>
           )}
         </div>
       </header>
