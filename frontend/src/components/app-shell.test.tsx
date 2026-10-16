@@ -19,9 +19,8 @@ describe("AppShell wiring", () => {
       </Providers>,
     )
 
-    // 品牌:mark + 应用名双行(模板 AppLayout 结构,应用身份)。
-    expect(screen.getByText("PandaAuth")).toBeInTheDocument()
-    expect(screen.getByAltText("PandaAuth")).toHaveAttribute("src", "/me/pandaauth-icon-512.png")
+    // 品牌使用注册的横版应用锁定组合。
+    expect(screen.getByRole("img", { name: "PandaAuth by PandaLabs" })).toHaveAttribute("src", "/me/pandaauth-logo-horizontal.png")
     // 导航:账户中心两页。
     expect(screen.getByText("账户总览")).toBeInTheDocument()
     expect(screen.getByText("安全设置")).toBeInTheDocument()
