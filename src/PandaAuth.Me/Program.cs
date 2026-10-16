@@ -111,6 +111,13 @@ if (!string.IsNullOrWhiteSpace(portalHomeUrl) &&
 {
     throw new InvalidOperationException("Auth:PortalHomeUrl 配置了但不是绝对 https URL；请修正或移除该配置。");
 }
+// 链接文案（可选,默认「返回熊猫门户」）：部署语境各异（租户门户/组织入口），可配不可滥——
+// 纯文本、长度上限 32，渲染走 React 文本节点（自动转义,无注入面）。
+var portalHomeLabel = builder.Configuration["Auth:PortalHomeLabel"]?.Trim() ?? "";
+if (portalHomeLabel.Length > 32)
+{
+    throw new InvalidOperationException("Auth:PortalHomeLabel 超过 32 字符；请修正或移除该配置。");
+}
 
 // 登出撤销客户端。超时取值的读取与校验都在 AddTokenRevocation 内、启动期完成——
 // 不能留给 AddHttpClient 的 configure 委托（它只在解析该类型时才执行，见该方法的注释）。
@@ -317,6 +324,7 @@ app.MapGet("/me/api/session", (HttpContext context) =>
         nickname = context.User.FindFirst(PandaAuthClaims.Nickname)?.Value,
         roles = context.User.FindAll(Claims.Role).Select(claim => claim.Value).ToArray(),
         portalHomeUrl,
+        portalHomeLabel = portalHomeLabel.Length == 0 ? null : portalHomeLabel,
     });
 });
 

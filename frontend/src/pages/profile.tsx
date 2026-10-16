@@ -10,6 +10,7 @@ type Session = {
   nickname: string | null
   roles: string[]
   portalHomeUrl: string | null
+  portalHomeLabel?: string | null
 }
 
 /**
@@ -60,7 +61,7 @@ export default function ProfilePage() {
                   href={session.portalHomeUrl}
                   className="text-sm text-primary no-underline hover:underline hover:underline-offset-2"
                 >
-                  返回熊猫门户
+                  {session.portalHomeLabel ?? "返回熊猫门户"}
                 </a>
               )}
               <Button variant="outline" size="sm" onClick={logout}>
