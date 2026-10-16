@@ -110,6 +110,7 @@ export const router = createBrowserRouter(
     },
     { path: "*", element: <NotFoundPage /> },
   ],
-  // 路由 basename 跟随 Vite base(SPA 挂载在 /me/ 子路径下,不配 basename 会导致全部路由不匹配)。
-  { basename: import.meta.env.BASE_URL },
+  // 路由 basename 跟随 Vite base,但剥掉尾斜杠:vite base 为 /me/ 而裸路径 /me 入口
+  // (无尾斜杠)在 RR8 下不匹配 basename 会渲染空树——规范化为 /me 后两种入口都命中。
+  { basename: import.meta.env.BASE_URL.replace(/\/+$/, "") || "/" },
 )
