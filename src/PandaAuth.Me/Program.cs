@@ -101,22 +101,25 @@ if (string.IsNullOrWhiteSpace(clientSecret))
     throw new InvalidOperationException("缺少 Auth:ClientSecret 配置（me-web 为机密客户端，密钥须由部署环境注入）。");
 }
 
-// 租户工作台门户入口（部署注入，如 https://t0000.s001.pandalabs.cn）：配置后账户中心页眉显示
-// 「返回工作台」。信任级别与 Auth:Issuer 相同——来自受控部署环境而非用户输入；未配置或缺省时
-// /me/api/session 返回 null，前端隐藏链接（各部署可独立采用，不阻断启动）；配置了但不是
-// 绝对 https URL 则启动失败——错误值比缺失更危险，宁可不启动也不下发坏链接。
-var portalHomeUrl = builder.Configuration["Auth:PortalHomeUrl"];
+// 发起应用入口（部署注入，如租户门户 https://t0000.s001.pandalabs.cn 或组织入口 https://appliket.com）：
+// 配置后账户中心页眉显示「返回应用」外链。信任级别与 Auth:Issuer 相同——来自受控部署环境而非用户输入；
+// 未配置或缺省时 /me/api/session 返回 null，前端隐藏链接（各部署可独立采用，不阻断启动）；
+// 配置了但不是绝对 https URL 则启动失败——错误值比缺失更危险，宁可不启动也不下发坏链接。
+// 命名演进（v0.5.x）：AppHome* 为正名——返回目标不一定是「门户」（组织 hub/工作台皆可）；
+// 旧 PortalHome* 键保留为弃用别名（优先 AppHome*，未设时回落），存量部署零破坏。
+var portalHomeUrl = builder.Configuration["Auth:AppHomeUrl"] ?? builder.Configuration["Auth:PortalHomeUrl"];
 if (!string.IsNullOrWhiteSpace(portalHomeUrl) &&
     (!Uri.TryCreate(portalHomeUrl, UriKind.Absolute, out var portalHome) || portalHome.Scheme != Uri.UriSchemeHttps))
 {
-    throw new InvalidOperationException("Auth:PortalHomeUrl 配置了但不是绝对 https URL；请修正或移除该配置。");
+    throw new InvalidOperationException("Auth:AppHomeUrl（或弃用别名 Auth:PortalHomeUrl）配置了但不是绝对 https URL；请修正或移除该配置。");
 }
-// 链接文案（可选,默认「返回熊猫门户」）：部署语境各异（租户门户/组织入口），可配不可滥——
+// 链接文案（可选,默认「返回应用」）：部署语境各异（租户门户/组织入口/工作台），可配不可滥——
 // 纯文本、长度上限 32，渲染走 React 文本节点（自动转义,无注入面）。
-var portalHomeLabel = builder.Configuration["Auth:PortalHomeLabel"]?.Trim() ?? "";
+var portalHomeLabel = builder.Configuration["Auth:AppHomeLabel"]?.Trim()
+    ?? builder.Configuration["Auth:PortalHomeLabel"]?.Trim() ?? "";
 if (portalHomeLabel.Length > 32)
 {
-    throw new InvalidOperationException("Auth:PortalHomeLabel 超过 32 字符；请修正或移除该配置。");
+    throw new InvalidOperationException("Auth:AppHomeLabel（或弃用别名 Auth:PortalHomeLabel）超过 32 字符；请修正或移除该配置。");
 }
 
 // 登出撤销客户端。超时取值的读取与校验都在 AddTokenRevocation 内、启动期完成——
@@ -323,8 +326,8 @@ app.MapGet("/me/api/session", (HttpContext context) =>
         email = context.User.FindFirst(Claims.Email)?.Value,
         nickname = context.User.FindFirst(PandaAuthClaims.Nickname)?.Value,
         roles = context.User.FindAll(Claims.Role).Select(claim => claim.Value).ToArray(),
-        portalHomeUrl,
-        portalHomeLabel = portalHomeLabel.Length == 0 ? null : portalHomeLabel,
+        appHomeUrl = portalHomeUrl,
+        appHomeLabel = portalHomeLabel.Length == 0 ? null : portalHomeLabel,
     });
 });
 

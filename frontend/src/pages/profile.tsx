@@ -9,8 +9,8 @@ type Session = {
   email: string | null
   nickname: string | null
   roles: string[]
-  portalHomeUrl: string | null
-  portalHomeLabel?: string | null
+  appHomeUrl: string | null
+  appHomeLabel?: string | null
 }
 
 /**
@@ -56,12 +56,12 @@ export default function ProfilePage() {
           </span>
           {session && (
             <div className="flex items-center gap-2">
-              {session.portalHomeUrl && (
+              {session.appHomeUrl && (
                 <a
-                  href={session.portalHomeUrl}
+                  href={session.appHomeUrl}
                   className="text-sm text-primary no-underline hover:underline hover:underline-offset-2"
                 >
-                  {session.portalHomeLabel ?? "返回熊猫门户"}
+                  {session.appHomeLabel ?? "返回应用"}
                 </a>
               )}
               <Button variant="outline" size="sm" onClick={logout}>
