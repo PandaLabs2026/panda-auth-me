@@ -1,116 +1,74 @@
-import { useEffect, useState } from "react"
+import { Link } from "react-router"
 
+import PageHeader from "@/components/patterns/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-
-type Session = {
-  subject: string
-  name: string | null
-  email: string | null
-  nickname: string | null
-  roles: string[]
-  appHomeUrl: string | null
-  appHomeLabel?: string | null
-}
+import { useSession } from "@/lib/auth"
 
 /**
- * 账户中心主页：展示当前身份；登录记录 / 设备管理 / 授权管理在 Phase 2 实装。
+ * 账户中心主页：展示当前身份；安全设置直达；登录记录 / 设备管理 / 授权管理在 Phase 2 实装。
+ * 壳（侧栏/顶栏/登出/返回应用）在模板 AppLayout,本页只管内容区。
  */
 export default function ProfilePage() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  const session = useSession()
 
-  useEffect(() => {
-    fetch("/me/api/session", { headers: { "X-Requested-With": "XMLHttpRequest" } })
-      .then(async (response) => {
-        if (response.status === 401) {
-          window.location.assign("/me/login")
-          return null
-        }
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return (await response.json()) as Session
-      })
-      .then((data) => data && setSession(data))
-      .catch(() => setError(true))
-      .finally(() => setLoading(false))
-  }, [])
-
-  async function logout() {
-    const response = await fetch("/me/api/antiforgery")
-    const { token } = (await response.json()) as { token: string }
-    await fetch("/me/api/logout", {
-      method: "POST",
-      headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
-    })
-    window.location.assign("/me/login")
+  if (session.isPending) {
+    return (
+      <div role="status" aria-label="正在加载身份" className="space-y-4">
+        <div className="h-24 w-full rounded-lg bg-muted" />
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[0, 1, 2].map((card) => (
+            <div key={card} className="h-28 w-full rounded-lg bg-muted" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
+  if (session.error || !session.data) {
+    return (
+      <p role="alert" className="text-destructive">
+        会话服务异常，请刷新重试。
+      </p>
+    )
+  }
+
+  const s = session.data
   return (
-    <div className="min-h-screen">
-      <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <span className="flex items-center gap-3 font-bold text-primary">
-            <img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth" className="h-9 w-auto max-w-full object-contain object-left" />
-            <span>账户中心</span>
-          </span>
-          {session && (
-            <div className="flex items-center gap-2">
-              {session.appHomeUrl && (
-                <a
-                  href={session.appHomeUrl}
-                  className="text-sm text-primary no-underline hover:underline hover:underline-offset-2"
-                >
-                  {session.appHomeLabel ?? "返回应用"}
-                </a>
-              )}
-              <Button variant="outline" size="sm" onClick={logout}>
-                退出登录
-              </Button>
-            </div>
-          )}
-        </div>
-      </header>
-      <main className="mx-auto max-w-3xl px-6 py-8">
-        {loading && <p className="text-muted-foreground">加载中…</p>}
-        {error && <p className="text-destructive">会话服务异常，请刷新重试。</p>}
-        {session && (
-          <>
-            <Card>
-              <CardHeader>
-                <CardTitle>{session.nickname ?? session.name ?? session.subject}</CardTitle>
-                <CardDescription>
-                  {session.email ?? "未绑定邮箱"} · {session.roles.length > 0 ? session.roles.join("、") : "普通用户"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                身份标识：<code>{session.subject}</code>
-              </CardContent>
-            </Card>
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">安全设置</CardTitle>
-                  <CardDescription>Passkey / TOTP / 恢复码管理</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" size="sm" onClick={() => window.location.assign("/me/security")}>
-                    打开安全设置
-                  </Button>
-                </CardContent>
-              </Card>
-              {["登录记录", "设备管理", "授权管理"].map((title) => (
-                <Card key={title}>
-                  <CardHeader>
-                    <CardTitle className="text-sm">{title}</CardTitle>
-                    <CardDescription>Phase 2 上线</CardDescription>
-                  </CardHeader>
-                </Card>
-              ))}
-            </div>
-          </>
-        )}
-      </main>
+    <div className="space-y-6">
+      <PageHeader title="账户总览" description="PandaAuth 账户的身份信息与自助入口。" />
+      <Card>
+        <CardHeader>
+          <CardTitle>{s.displayName}</CardTitle>
+          <CardDescription>
+            {s.email ?? "未绑定邮箱"} · {s.roles && s.roles.length > 0 ? s.roles.join("、") : "普通用户"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          身份标识：<code className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.subject}</code>
+        </CardContent>
+      </Card>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">安全设置</CardTitle>
+            <CardDescription>Passkey / TOTP / 恢复码管理</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" size="sm">
+              <Link to="/security">打开安全设置</Link>
+            </Button>
+          </CardContent>
+        </Card>
+        {["登录记录", "设备管理", "授权管理"].map((title) => (
+          <Card key={title}>
+            <CardHeader>
+              <CardTitle className="text-sm">{title}</CardTitle>
+              <CardDescription>Phase 2 上线</CardDescription>
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
     </div>
   )
 }

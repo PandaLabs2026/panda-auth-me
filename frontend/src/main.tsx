@@ -1,24 +1,25 @@
-import "./index.css"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { createBrowserRouter, RouterProvider } from "react-router-dom"
-import ProfilePage from "@/pages/profile"
-import SecurityPage from "@/pages/security"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
+import { RouterProvider } from "react-router/dom"
+import "./style.css"
+import ErrorBoundary from "@/components/patterns/ErrorBoundary"
+import { router } from "@/app/router"
 
-// 部署基路径 /me/（Caddy 将 /me/* 反代到本服务）。
-const router = createBrowserRouter(
-  [
-    { path: "/", element: <ProfilePage /> },
-    { path: "/security", element: <SecurityPage /> },
-    { path: "*", element: <ProfilePage /> },
-  ],
-  {
-    basename: "/me",
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 30_000 },
   },
-)
+})
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>,
 )

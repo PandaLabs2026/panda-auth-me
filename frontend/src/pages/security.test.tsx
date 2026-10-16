@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import SecurityPage from "@/pages/security"
+import { Providers } from "@/test/utils"
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -54,7 +55,7 @@ describe("SecurityPage", () => {
   it("renders mfa status and registered factors", async () => {
     routeFetch(loadedState())
 
-    render(<SecurityPage />)
+    render(<Providers><SecurityPage /></Providers>)
 
     expect(await screen.findByText(/已启用/)).toBeInTheDocument()
     expect(screen.getByText("Windows Hello")).toBeInTheDocument()
@@ -64,7 +65,7 @@ describe("SecurityPage", () => {
   it("marks passkey as unsupported and keeps enrollment disabled without WebAuthn", async () => {
     routeFetch(loadedState())
 
-    render(<SecurityPage />)
+    render(<Providers><SecurityPage /></Providers>)
 
     expect(await screen.findByText(/此浏览器不支持 Passkey/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "添加 Passkey" })).toBeDisabled()
@@ -76,24 +77,30 @@ describe("SecurityPage", () => {
       ["/account/mfa/user/factors", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
     ])
 
-    render(<SecurityPage />)
+    render(<Providers><SecurityPage /></Providers>)
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/登录状态已失效/)
   })
 
-  it("surfaces the server error when revoking the last active factor fails", async () => {
+  it("surfaces the server error via the confirm dialog when revoking the last active factor fails", async () => {
     routeFetch([
       ["/account/mfa/user/antiforgery", () => jsonResponse({ token: "test-token" })],
       ["/account/mfa/user/factors/revoke", () => jsonResponse({ error: "Cannot remove the last active factor." }, 400)],
       ...loadedState(),
     ])
-    vi.spyOn(window, "confirm").mockReturnValue(true)
+    const user = userEvent.setup()
 
-    render(<SecurityPage />)
+    render(<Providers><SecurityPage /></Providers>)
     await screen.findByText("Windows Hello")
-    await userEvent.click(screen.getByRole("button", { name: "撤销" }))
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Cannot remove the last active factor/)
+    // ConfirmAction:先确认(不直接发请求),失败经全局 notify 驻留展示、对话框保持可重试。
+    await user.click(screen.getByRole("button", { name: "撤销" }))
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes("/factors/revoke"))).toBe(false)
+
+    await user.click(screen.getByTestId("confirm-action-confirm"))
+    expect(await screen.findAllByText(/Cannot remove the last active factor/)).toBeTruthy()
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
   })
 
   // 2026-09-30 缺口收口：仅有 TOTP 因子的用户此前无法完成 step-up（旧 UI 只提供 Passkey 断言且按钮
@@ -127,7 +134,7 @@ describe("SecurityPage", () => {
       ],
     ])
 
-    render(<SecurityPage />)
+    render(<Providers><SecurityPage /></Providers>)
     await screen.findByText("TOTP 验证器")
 
     // 没有 Passkey 因子：不显示 Passkey step-up 入口（有因子才提供对应断言路径）。

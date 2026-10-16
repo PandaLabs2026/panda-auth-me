@@ -10,6 +10,8 @@
 
 PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 与 React 19 前端组成。引用同级 [panda-auth-share](https://github.com/PandaLabs2026/panda-auth-share)，作为 Server 的第一方客户端 `me-web`，生产路径为 `/me`，监听 127.0.0.1:9007。
 
+前端基于 [panda-webapp-template](https://github.com/PandaLabs2026/panda-webapp-template) **v0.5.2**（2026-10-16 对齐批次）：模板正典件（`ui/`、`patterns/`、`lib/i18n|notify`、`hooks/`、`typeset.css`）零改动拷贝，应用渲染在模板 AppLayout 内（侧栏导航 账户总览/安全设置、NavUser 承载 BFF 登出、命令面板、RequireAuth、403/500/404 错误页、阅读宽度 `contentClassName`）。应用身份留在令牌层（PandaAuth 钢蓝主题、`index.html` 恒暗）与两个 API 面：`/me/api/*`（会话/防伪/登出，`X-XSRF-Token`）在 `lib/auth.ts`，IDP `/account/mfa/user/*` 同源直连客户端在 `lib/mfa-api.ts`（`RequestVerificationToken`）。危险 MFA 操作（撤销因子/重生成恢复码）统一走 ConfirmAction + 全局 notify；step-up 提示保持页内常驻（5 分钟窗口语境需持续可见）。本应用**就是** IDP `/me` 账户入口契约的本体，自身会话的 `accountEntryUrl` 恒空。
+
 ## 当前实现与限制
 
 [后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览，[安全设置页](frontend/src/pages/security.tsx)可自助管理 Passkey/TOTP/恢复码（直连同源调用 IDP 的 `/account/mfa/user/*`，写操作经 IDP antiforgery 令牌；代码已具备，生产发布与端到端验收待补）。登录记录、设备、授权管理和改密仍为占位或规划。
