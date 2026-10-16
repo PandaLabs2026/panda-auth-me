@@ -43,13 +43,7 @@ export function AppShell() {
       navItems={navItems}
       title="账户中心"
       brand={
-        <>
-          <img src="/me/pandaauth-icon-512.png" alt="PandaAuth" className="size-8 rounded-lg object-contain" />
-          <span className="grid flex-1 text-left leading-tight">
-            <span className="font-semibold">PandaAuth</span>
-            <span className="text-xs text-muted-foreground">账户中心</span>
-          </span>
-        </>
+        <img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain object-left" />
       }
       contentClassName="max-w-4xl mx-auto"
       headerActions={<HeaderActions />}
