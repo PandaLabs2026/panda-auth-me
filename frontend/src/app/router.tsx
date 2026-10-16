@@ -1,0 +1,115 @@
+import { lazy, Suspense, useEffect } from "react"
+import { createBrowserRouter, useNavigate } from "react-router"
+import { ExternalLinkIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
+import AppLayout, { type NavItem } from "@/components/patterns/AppLayout"
+import HeaderActions from "@/components/header-actions"
+import RequireAuth from "@/components/patterns/RequireAuth"
+import ForbiddenPage from "@/pages/ForbiddenPage"
+import LoginPage from "@/pages/login"
+import NotFoundPage from "@/pages/NotFoundPage"
+import ServerErrorPage from "@/pages/ServerErrorPage"
+import { sessionApi, registerSessionExpiredHandler } from "@/lib/auth"
+
+/**
+ * 路由(模板 v0.5.0 形态):/login 为桥接页(立即整页跳 BFF /me/login 走 OIDC 挑战),
+ * 其余挂在 AppLayout(侧栏+固定顶栏)与 RequireAuth 守卫之下;403/500/404 错误页入册。
+ * 账户中心是阅读宽度应用:AppLayout 内容区应用级收窄 max-w-4xl(v0.4.3 旋钮)。
+ */
+
+const ProfilePage = lazy(() => import("@/pages/profile"))
+const SecurityPage = lazy(() => import("@/pages/security"))
+
+function PageFallback() {
+  return (
+    <div className="flex flex-col gap-4 pt-2" role="status" aria-label="页面加载中">
+      <div className="h-6 w-64 rounded bg-muted" />
+      <div className="h-24 w-full rounded bg-muted" />
+      <div className="h-24 w-full rounded bg-muted" />
+    </div>
+  )
+}
+
+const page = (node: React.ReactNode) => <Suspense fallback={<PageFallback />}>{node}</Suspense>
+
+const navItems: NavItem[] = [
+  { to: "/", label: "账户总览", icon: UserRoundIcon, end: true },
+  { to: "/security", label: "安全设置", icon: ShieldCheckIcon },
+]
+
+/** 布局组装(模板 AppLayout 之上的应用层):品牌/导航/顶栏常驻件/命令面板动作。 */
+export function AppShell() {
+  return (
+    <AppLayout
+      navItems={navItems}
+      title="账户中心"
+      brand={
+        <>
+          <img src="/me/pandaauth-icon-512.png" alt="PandaAuth" className="size-8 rounded-lg object-contain" />
+          <span className="grid flex-1 text-left leading-tight">
+            <span className="font-semibold">PandaAuth</span>
+            <span className="text-xs text-muted-foreground">账户中心</span>
+          </span>
+        </>
+      }
+      contentClassName="max-w-4xl mx-auto"
+      headerActions={<HeaderActions />}
+      commandActions={[
+        {
+          id: "app-home",
+          label: "返回应用",
+          icon: ExternalLinkIcon,
+          run: () => {
+            // appHomeUrl 由会话下发,命令面板动作取运行时值。
+            void sessionApi.me().then((s) => s?.appHomeUrl && window.location.assign(s.appHomeUrl))
+          },
+        },
+        { id: "logout", label: "退出登录", icon: LogOutIcon, shortcut: "⌘⇧Q", run: () => void sessionApi.logout() },
+      ]}
+    />
+  )
+}
+
+/** 401 → 会话过期处理:账户中心无 SPA 登录页,/login 桥接页整页跳 BFF 挑战。 */
+function SessionExpiredBridge() {
+  const navigate = useNavigate()
+  useEffect(() => {
+    registerSessionExpiredHandler((from) =>
+      navigate("/login", { replace: true, state: { from: from.startsWith("/") ? from : "/" } }),
+    )
+  }, [navigate])
+  return null
+}
+
+export const router = createBrowserRouter(
+  [
+    {
+      path: "/login",
+      element: (
+        <>
+          <SessionExpiredBridge />
+          <LoginPage />
+        </>
+      ),
+    },
+    {
+      path: "/",
+      element: (
+        <>
+          <SessionExpiredBridge />
+          <RequireAuth>
+            <AppShell />
+          </RequireAuth>
+        </>
+      ),
+      children: [
+        { index: true, element: page(<ProfilePage />) },
+        { path: "security", element: page(<SecurityPage />) },
+        { path: "403", element: <ForbiddenPage /> },
+        { path: "500", element: <ServerErrorPage /> },
+      ],
+    },
+    { path: "*", element: <NotFoundPage /> },
+  ],
+  // 路由 basename 跟随 Vite base(SPA 挂载在 /me/ 子路径下,不配 basename 会导致全部路由不匹配)。
+  { basename: import.meta.env.BASE_URL },
+)
