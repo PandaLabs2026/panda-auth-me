@@ -20,7 +20,9 @@ describe("AppShell wiring", () => {
     )
 
     // 品牌使用注册的横版应用锁定组合。
-    expect(screen.getByRole("img", { name: "PandaAuth by PandaLabs" })).toHaveAttribute("src", "/me/pandaauth-logo-horizontal.png")
+    const logo = screen.getByRole("img", { name: "PandaAuth by PandaLabs" })
+    expect(logo).toHaveAttribute("src", "/me/pandaauth-logo-horizontal.png")
+    expect(logo).toHaveClass("h-9", "w-auto", "object-contain")
     // 导航:账户中心两页。
     expect(screen.getByText("账户总览")).toBeInTheDocument()
     expect(screen.getByText("安全设置")).toBeInTheDocument()
