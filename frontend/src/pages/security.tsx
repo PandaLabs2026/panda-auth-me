@@ -8,14 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
+import { useI18n } from "@/lib/i18n"
 import { credentialToJson, toAssertionOptions, toCreationOptions } from "@/lib/webauthn"
 
 const passkeySupported = typeof window !== "undefined" && "PublicKeyCredential" in window
-
-function describeFactor(factor: MfaFactor): string {
-  if (factor.type === "totp") return "TOTP 验证器"
-  return factor.friendlyName ?? "Passkey"
-}
 
 /**
  * 安全设置：普通用户自助管理 MFA（Passkey / TOTP / 恢复码）。
@@ -25,6 +21,13 @@ function describeFactor(factor: MfaFactor): string {
  * step-up 流程的提示保持页内常驻（5 分钟窗口语境需要持续可见）。
  */
 export default function SecurityPage() {
+  const { t } = useI18n()
+
+  function describeFactor(factor: MfaFactor): string {
+    if (factor.type === "totp") return t("TOTP 验证器")
+    return factor.friendlyName ?? t("Passkey")
+  }
+
   const [status, setStatus] = useState<MfaStatus | null>(null)
   const [factors, setFactors] = useState<MfaFactor[]>([])
   const [loading, setLoading] = useState(true)
@@ -71,12 +74,12 @@ export default function SecurityPage() {
     const credential = await navigator.credentials.create({
       publicKey: toCreationOptions(ceremony.publicKey),
     })
-    if (!credential) throw new Error("未能创建 Passkey。")
+    if (!credential) throw new Error(t("未能创建 Passkey。"))
     const completed = await mfaApi.passkeyEnrollmentComplete(
       ceremony.ceremonyId,
       credentialToJson(credential as PublicKeyCredential),
     )
-    return `Passkey 已注册，当前共 ${completed.activePasskeyCount} 个。`
+    return t("Passkey 已注册，当前共 {count} 个。", { count: completed.activePasskeyCount })
   }
 
   async function stepUpWithPasskey(): Promise<string> {
@@ -84,20 +87,20 @@ export default function SecurityPage() {
     const credential = await navigator.credentials.get({
       publicKey: toAssertionOptions(ceremony.publicKey),
     })
-    if (!credential) throw new Error("未能验证 Passkey。")
+    if (!credential) throw new Error(t("未能验证 Passkey。"))
     await mfaApi.passkeyAssertionComplete(ceremony.ceremonyId, credentialToJson(credential as PublicKeyCredential))
-    return "验证通过：5 分钟内可以继续敏感操作。"
+    return t("验证通过：5 分钟内可以继续敏感操作。")
   }
 
   async function stepUpWithTotp(): Promise<string> {
     await mfaApi.totpAssert(totpAssertCode)
     setTotpAssertCode("")
-    return "验证通过：5 分钟内可以继续敏感操作。"
+    return t("验证通过：5 分钟内可以继续敏感操作。")
   }
 
   function onAddPasskey() {
     if (!passkeySupported) {
-      setError("此浏览器不支持 Passkey，请使用系统自带的验证器（如 Windows Hello）。")
+      setError(t("此浏览器不支持 Passkey，请使用系统自带的验证器（如 Windows Hello）。"))
       return
     }
     void run("enroll-passkey", async () => {
@@ -105,10 +108,11 @@ export default function SecurityPage() {
         return await enrollPasskey()
       } catch (cause) {
         const message = (cause as Error).message
-        if (message.startsWith("当前条件不满足")) {
+        // mfa-api 的 403 兜底文案随 locale 双语（"当前条件不满足" / "Preconditions not met"），两者都要命中引导分支。
+        if (message.startsWith("当前条件不满足") || message.startsWith("Preconditions not met")) {
           throw new Error(
             status?.hasActiveFactor
-              ? "添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口）：请用 Passkey 或 TOTP 完成验证。"
+              ? t("添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口）：请用 Passkey 或 TOTP 完成验证。")
               : message,
             { cause },
           )
@@ -147,7 +151,7 @@ export default function SecurityPage() {
       setTotpSetup(null)
       setTotpQrSvg(null)
       setTotpCode("")
-      return "TOTP 备用验证已启用。"
+      return t("TOTP 备用验证已启用。")
     })
   }
 
@@ -167,9 +171,9 @@ export default function SecurityPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="安全设置" description="管理 Passkey、TOTP 与恢复码；敏感操作前需要完成一次因子验证。" />
+      <PageHeader title={t("安全设置")} description={t("管理 Passkey、TOTP 与恢复码；敏感操作前需要完成一次因子验证。")} />
 
-      {loading && <p role="status" className="text-muted-foreground">加载中…</p>}
+      {loading && <p role="status" className="text-muted-foreground">{t("加载中…")}</p>}
       {!loading && (
         <>
           {error && (
@@ -184,17 +188,21 @@ export default function SecurityPage() {
           )}
           {status?.requiresReconfiguration && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              账号带有旧版两步验证标记但没有可用因子：下次登录会进入重新配置流程，请按页面指引重新设置。
+              {t("账号带有旧版两步验证标记但没有可用因子：下次登录会进入重新配置流程，请按页面指引重新设置。")}
             </p>
           )}
 
           <Card>
             <CardHeader>
-              <CardTitle>多因素验证</CardTitle>
+              <CardTitle>{t("多因素验证")}</CardTitle>
               <CardDescription>
                 {status?.hasActiveFactor
-                  ? `已启用：${status.activePasskeyCount} 个 Passkey、${factors.filter((f) => f.type === "totp").length} 个 TOTP、${status.recoveryCodeCount} 个未用恢复码`
-                  : "尚未启用。启用后可在敏感操作前要求第二重验证。"}
+                  ? t("已启用：{passkeyCount} 个 Passkey、{totpCount} 个 TOTP、{recoveryCodeCount} 个未用恢复码", {
+                      passkeyCount: status.activePasskeyCount,
+                      totpCount: factors.filter((f) => f.type === "totp").length,
+                      recoveryCodeCount: status.recoveryCodeCount,
+                    })
+                  : t("尚未启用。启用后可在敏感操作前要求第二重验证。")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -202,16 +210,16 @@ export default function SecurityPage() {
           <div className="grid gap-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Passkey</CardTitle>
+                <CardTitle className="text-sm">{t("Passkey")}</CardTitle>
                 <CardDescription>
                   {passkeySupported
-                    ? "使用平台验证器（Windows Hello / 触控 ID），设备会要求生物识别或 PIN。"
-                    : "此浏览器不支持 Passkey，请使用系统自带浏览器的最新版本。"}
+                    ? t("使用平台验证器（Windows Hello / 触控 ID），设备会要求生物识别或 PIN。")
+                    : t("此浏览器不支持 Passkey，请使用系统自带浏览器的最新版本。")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex gap-2">
                 <Button size="sm" disabled={!passkeySupported || busy !== null} onClick={onAddPasskey}>
-                  {busy === "enroll-passkey" ? "注册中…" : "添加 Passkey"}
+                  {busy === "enroll-passkey" ? t("注册中…") : t("添加 Passkey")}
                 </Button>
                 {status?.hasActiveFactor && hasPasskey && (
                   <Button
@@ -220,7 +228,7 @@ export default function SecurityPage() {
                     disabled={!passkeySupported || busy !== null}
                     onClick={onStepUp}
                   >
-                    {busy === "step-up" ? "验证中…" : "先验证已有因子"}
+                    {busy === "step-up" ? t("验证中…") : t("先验证已有因子")}
                   </Button>
                 )}
               </CardContent>
@@ -228,20 +236,20 @@ export default function SecurityPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">TOTP 备用验证</CardTitle>
+                <CardTitle className="text-sm">{t("TOTP 备用验证")}</CardTitle>
                 <CardDescription>
                   {hasTotp
-                    ? "已配置 TOTP 验证器。如需更换，请先在下方因子列表中撤销现有 TOTP。"
-                    : "使用认证器 App（如 Microsoft Authenticator）扫描或手动录入密钥。"}
+                    ? t("已配置 TOTP 验证器。如需更换，请先在下方因子列表中撤销现有 TOTP。")
+                    : t("使用认证器 App（如 Microsoft Authenticator）扫描或手动录入密钥。")}
                 </CardDescription>
               </CardHeader>
               {hasTotp && (
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    敏感操作前可用 TOTP 验证码完成验证（打开 5 分钟窗口）。
+                    {t("敏感操作前可用 TOTP 验证码完成验证（打开 5 分钟窗口）。")}
                   </p>
                   <div className="space-y-1">
-                    <Label htmlFor="totp-assert-code">输入认证器 6 位验证码</Label>
+                    <Label htmlFor="totp-assert-code">{t("输入认证器 6 位验证码")}</Label>
                     <Input
                       id="totp-assert-code"
                       inputMode="numeric"
@@ -257,7 +265,7 @@ export default function SecurityPage() {
                     disabled={busy !== null || totpAssertCode.length !== 6}
                     onClick={onStepUpWithTotp}
                   >
-                    {busy === "step-up-totp" ? "验证中…" : "验证 TOTP"}
+                    {busy === "step-up-totp" ? t("验证中…") : t("验证 TOTP")}
                   </Button>
                 </CardContent>
               )}
@@ -265,13 +273,13 @@ export default function SecurityPage() {
                 <CardContent className="space-y-3">
                   {!totpSetup ? (
                     <Button variant="outline" size="sm" disabled={busy !== null} onClick={onBeginTotp}>
-                      {busy === "totp-begin" ? "生成中…" : "开始配置 TOTP"}
+                      {busy === "totp-begin" ? t("生成中…") : t("开始配置 TOTP")}
                     </Button>
                   ) : (
                     <>
                       {totpQrSvg && (
                         <div className="text-sm">
-                          <p className="mb-1 text-muted-foreground">用认证器 App 扫码录入：</p>
+                          <p className="mb-1 text-muted-foreground">{t("用认证器 App 扫码录入：")}</p>
                           <div
                             className="inline-block rounded-md bg-white p-2 [&>svg]:block [&>svg]:h-44 [&>svg]:w-44"
                             // 内容为本地生成的 SVG 二维码（来源：本页 provisioningUri），无不可信输入
@@ -280,11 +288,11 @@ export default function SecurityPage() {
                         </div>
                       )}
                       <div className="text-sm">
-                        <p className="mb-1 text-muted-foreground">或手动添加密钥：</p>
+                        <p className="mb-1 text-muted-foreground">{t("或手动添加密钥：")}</p>
                         <code className="break-all rounded bg-muted px-2 py-1">{totpSetup.secret}</code>
                       </div>
                       <div className="space-y-1">
-                        <Label htmlFor="totp-code">输入认证器 6 位验证码以确认</Label>
+                        <Label htmlFor="totp-code">{t("输入认证器 6 位验证码以确认")}</Label>
                         <Input
                           id="totp-code"
                           inputMode="numeric"
@@ -295,7 +303,7 @@ export default function SecurityPage() {
                         />
                       </div>
                       <Button size="sm" disabled={busy !== null || totpCode.length !== 6} onClick={onConfirmTotp}>
-                        {busy === "totp-confirm" ? "确认中…" : "确认 TOTP"}
+                        {busy === "totp-confirm" ? t("确认中…") : t("确认 TOTP")}
                       </Button>
                     </>
                   )}
@@ -305,29 +313,29 @@ export default function SecurityPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">恢复码</CardTitle>
+                <CardTitle className="text-sm">{t("恢复码")}</CardTitle>
                 <CardDescription>
                   {status
-                    ? `剩余 ${status.recoveryCodeCount} 个未使用。丢失所有验证器时，可用恢复码登录并完成验证。`
-                    : "丢失所有验证器时的一次性备用凭据。"}
+                    ? t("剩余 {count} 个未使用。丢失所有验证器时，可用恢复码登录并完成验证。", { count: status.recoveryCodeCount })
+                    : t("丢失所有验证器时的一次性备用凭据。")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <ConfirmAction
                   trigger={
                     <Button variant="outline" size="sm" disabled={busy !== null}>
-                      {busy === "recovery" ? "生成中…" : "生成新恢复码"}
+                      {busy === "recovery" ? t("生成中…") : t("生成新恢复码")}
                     </Button>
                   }
-                  title="生成新恢复码？"
-                  description="重新生成将使现有未使用的恢复码全部失效，且新码只在离开本页前显示一次。"
-                  confirmLabel="生成新恢复码"
-                  successMessage="新恢复码已生成，请立即保存。"
+                  title={t("生成新恢复码？")}
+                  description={t("重新生成将使现有未使用的恢复码全部失效，且新码只在离开本页前显示一次。")}
+                  confirmLabel={t("生成新恢复码")}
+                  successMessage={t("新恢复码已生成，请立即保存。")}
                   onConfirm={generateRecoveryCodes}
                 />
                 {recoveryCodes && (
                   <div className="rounded-md border p-3">
-                    <p className="mb-2 text-sm text-destructive">请立即保存，离开本页后不再显示：</p>
+                    <p className="mb-2 text-sm text-destructive">{t("请立即保存，离开本页后不再显示：")}</p>
                     <div className="grid grid-cols-2 gap-1 font-mono text-sm sm:grid-cols-5">
                       {recoveryCodes.map((code) => (
                         <span key={code}>{code}</span>
@@ -340,12 +348,12 @@ export default function SecurityPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">已注册的验证因子</CardTitle>
-                <CardDescription>撤销最后一个可用因子会被服务端拒绝。</CardDescription>
+              <CardTitle className="text-sm">{t("已注册的验证因子")}</CardTitle>
+              <CardDescription>{t("撤销最后一个可用因子会被服务端拒绝。")}</CardDescription>
               </CardHeader>
               <CardContent>
                 {factors.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无已确认的验证因子。</p>
+                  <p className="text-sm text-muted-foreground">{t("暂无已确认的验证因子。")}</p>
                 ) : (
                   <ul className="divide-y">
                     {factors.map((factor) => (
@@ -353,20 +361,20 @@ export default function SecurityPage() {
                         <div>
                           <p>{describeFactor(factor)}</p>
                           <p className="text-xs text-muted-foreground">
-                            添加于 {new Date(factor.createdAt).toLocaleString()}
-                            {factor.lastUsedAt && ` · 最近使用 ${new Date(factor.lastUsedAt).toLocaleString()}`}
+                            {t("添加于 {date}", { date: new Date(factor.createdAt).toLocaleString() })}
+                            {factor.lastUsedAt && ` · ${t("最近使用 {date}", { date: new Date(factor.lastUsedAt).toLocaleString() })}`}
                           </p>
                         </div>
                         <ConfirmAction
                           trigger={
                             <Button variant="destructive" size="sm">
-                              撤销
+                              {t("撤销")}
                             </Button>
                           }
-                          title={`撤销「${describeFactor(factor)}」？`}
-                          description="撤销后无法恢复；如这是最后一个可用因子，两步验证将被关闭。"
-                          confirmLabel="撤销"
-                          successMessage="因子已撤销。"
+                          title={t("撤销「{name}」？", { name: describeFactor(factor) })}
+                          description={t("撤销后无法恢复；如这是最后一个可用因子，两步验证将被关闭。")}
+                          confirmLabel={t("撤销")}
+                          successMessage={t("因子已撤销。")}
                           onConfirm={() => revokeFactor(factor)}
                         />
                       </li>
