@@ -2,7 +2,10 @@
  * 账户中心安全设置 → IDP 用户 MFA 端点（/account/mfa/user/*）的直连同源封装。
  * 认证用 IDP 登录 Cookie；写操作需先取 antiforgery 令牌并以默认头
  * RequestVerificationToken 回传（IDP 未配置自定义 antiforgery header）。
+ * 应用侧兜底文案按 currentLocale() 二选一；IDP body.error 透传不动（服务端契约）。
  */
+
+import { currentLocale } from "@/i18n/config"
 
 const MFA_BASE = "/account/mfa/user"
 
@@ -28,8 +31,12 @@ async function errorMessage(response: Response): Promise<string> {
   } catch {
     // 非 JSON 响应体，落到通用文案
   }
-  if (response.status === 403) return "当前条件不满足：需要已确认的邮箱，且刚刚完成过验证。"
-  return `请求失败（HTTP ${response.status}）`
+  const en = currentLocale() === "en"
+  if (response.status === 403)
+    return en
+      ? "Preconditions not met: a confirmed email and a recent verification are required."
+      : "当前条件不满足：需要已确认的邮箱，且刚刚完成过验证。"
+  return en ? `Request failed (HTTP ${response.status})` : `请求失败（HTTP ${response.status}）`
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -39,7 +46,11 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const isJson = response.headers.get("content-type")?.includes("application/json") ?? false
   if (response.status === 401 || !isJson) {
     window.location.assign("/me/login")
-    throw new Error("登录状态已失效，正在重新登录…")
+    throw new Error(
+      currentLocale() === "en"
+        ? "Your session has expired. Signing you in again..."
+        : "登录状态已失效，正在重新登录…",
+    )
   }
   if (!response.ok) throw new Error(await errorMessage(response))
   return (await response.json()) as T
