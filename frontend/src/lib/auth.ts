@@ -63,32 +63,50 @@ async function responseError(response: Response): Promise<Error> {
 export const sessionApi = {
   /** 会话探测：未登录/会话失效（401）静默收敛为 null，守卫据此送 /login 桥接页。 */
   async me(): Promise<Session | null> {
-    const res = await fetchWithTimeout("/me/api/session", { headers: { "X-Requested-With": "XMLHttpRequest" } }, 10_000)
-    if (res.status === 401) return null
-    if (!res.ok) throw await responseError(res)
-    if (!(res.headers.get("content-type") ?? "").includes("application/json")) return null
-    const raw = (await res.json()) as BffSession
-    return {
-      displayName: raw.nickname ?? raw.name ?? raw.subject,
-      email: raw.email ?? undefined,
-      roles: raw.roles,
-      accountEntryUrl: null,
-      subject: raw.subject,
-      appHomeUrl: raw.appHomeUrl,
-      appHomeLabel: raw.appHomeLabel,
-    }
+    return fetchWithTimeout(
+      "/me/api/session",
+      { headers: { "X-Requested-With": "XMLHttpRequest" } },
+      async (res) => {
+        if (res.status === 401) return null
+        if (!res.ok) throw await responseError(res)
+        if (!(res.headers.get("content-type") ?? "").includes("application/json")) return null
+        const raw = (await res.json()) as BffSession
+        return {
+          displayName: raw.nickname ?? raw.name ?? raw.subject,
+          email: raw.email ?? undefined,
+          roles: raw.roles,
+          accountEntryUrl: null,
+          subject: raw.subject,
+          appHomeUrl: raw.appHomeUrl,
+          appHomeLabel: raw.appHomeLabel,
+        }
+      },
+      10_000,
+    )
   },
 
   /** 登出：防伪令牌成对 POST（注意 BFF 头是 X-XSRF-Token，IDP MFA 端点才是 RequestVerificationToken）。 */
   async logout(): Promise<void> {
-    const antiforgery = await fetchWithTimeout("/me/api/antiforgery", {}, 10_000)
-    if (!antiforgery.ok) throw await responseError(antiforgery)
-    const { token } = (await antiforgery.json()) as { token: string }
-    const response = await fetchWithTimeout("/me/api/logout", {
-      method: "POST",
-      headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
-    }, 10_000)
-    if (!response.ok) throw await responseError(response)
+    const token = await fetchWithTimeout(
+      "/me/api/antiforgery",
+      {},
+      async (antiforgery) => {
+        if (!antiforgery.ok) throw await responseError(antiforgery)
+        return ((await antiforgery.json()) as { token: string }).token
+      },
+      10_000,
+    )
+    await fetchWithTimeout(
+      "/me/api/logout",
+      {
+        method: "POST",
+        headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
+      },
+      async (response) => {
+        if (!response.ok) throw await responseError(response)
+      },
+      10_000,
+    )
     window.location.assign("/me/login")
   },
 }
