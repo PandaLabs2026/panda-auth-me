@@ -3,13 +3,14 @@ import { createBrowserRouter, useNavigate } from "react-router"
 import { ExternalLinkIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
 import AppLayout, { type NavItem } from "@/components/patterns/AppLayout"
 import HeaderActions from "@/components/header-actions"
-import RequireAuth from "@/components/patterns/RequireAuth"
+import { SessionGate } from "@/app/SessionGate"
 import ForbiddenPage from "@/pages/ForbiddenPage"
 import LoginPage from "@/pages/login"
 import NotFoundPage from "@/pages/NotFoundPage"
 import ServerErrorPage from "@/pages/ServerErrorPage"
 import { useI18n } from "@/lib/i18n"
 import { sessionApi, registerSessionExpiredHandler } from "@/lib/auth"
+import { notify } from "@/lib/notify"
 
 /**
  * 路由(模板 v0.5.0 形态):/login 为桥接页(立即整页跳 BFF /me/login 走 OIDC 挑战),
@@ -56,10 +57,18 @@ export function AppShell() {
           icon: ExternalLinkIcon,
           run: () => {
             // appHomeUrl 由会话下发,命令面板动作取运行时值。
-            void sessionApi.me().then((s) => s?.appHomeUrl && window.location.assign(s.appHomeUrl))
+            void sessionApi.me()
+              .then((s) => s?.appHomeUrl && window.location.assign(s.appHomeUrl))
+              .catch((error) => notify.failure(error, "暂时无法读取应用入口。"))
           },
         },
-        { id: "logout", label: t("退出登录"), icon: LogOutIcon, shortcut: "⌘⇧Q", run: () => void sessionApi.logout() },
+        {
+          id: "logout",
+          label: t("退出登录"),
+          icon: LogOutIcon,
+          shortcut: "⌘⇧Q",
+          run: () => void sessionApi.logout().catch((error) => notify.failure(error, "退出登录失败；当前会话未确认已注销。")),
+        },
       ]}
     />
   )
@@ -92,9 +101,9 @@ export const router = createBrowserRouter(
       element: (
         <>
           <SessionExpiredBridge />
-          <RequireAuth>
+          <SessionGate>
             <AppShell />
-          </RequireAuth>
+          </SessionGate>
         </>
       ),
       children: [

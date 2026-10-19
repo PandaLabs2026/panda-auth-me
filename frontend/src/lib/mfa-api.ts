@@ -6,6 +6,7 @@
  */
 
 import { currentLocale } from "@/i18n/config"
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout"
 
 const MFA_BASE = "/account/mfa/user"
 
@@ -40,7 +41,7 @@ async function errorMessage(response: Response): Promise<string> {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const response = await fetchWithTimeout(path, init)
   // IDP 的 [Authorize] 对未登录请求回 302 到登录页（fetch 会跟随并拿到 200 HTML），
   // 所以「非 JSON 响应」与 401 一样都意味着会话失效，统一送回 /me/login 重走 OIDC。
   const isJson = response.headers.get("content-type")?.includes("application/json") ?? false

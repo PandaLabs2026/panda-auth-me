@@ -71,5 +71,6 @@
   "退出登录": "Sign out",
   "撤销": "Revoke",
   "此浏览器不支持 Passkey，请使用系统自带的验证器（如 Windows Hello）。": "This browser does not support Passkeys. Please use your system authenticator (e.g. Windows Hello).",
-  "添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口）：请用 Passkey 或 TOTP 完成验证。": "Before adding a new Passkey you must verify an existing factor (5-minute window): verify with a Passkey or TOTP first."
+  "添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口）：请用 Passkey 或 TOTP 完成验证。": "Before adding a new Passkey you must verify an existing factor (5-minute window): verify with a Passkey or TOTP first.",
+  "重试": "Retry"
 }

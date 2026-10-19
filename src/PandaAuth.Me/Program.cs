@@ -60,6 +60,52 @@ builder.Services
         // 注意这只是浏览器侧时效；令牌本身的有效期由 IDP 与登出撤销另行约束，不由此值决定。
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
+        options.Events.OnValidatePrincipal = async context =>
+        {
+            var lifecycle = context.HttpContext.RequestServices.GetRequiredService<MeSessionLifecycle>();
+            var identity = context.Principal?.Identity as ClaimsIdentity;
+            if (identity is not null)
+            {
+                if (!MeSessionLifecycle.TryGetSessionId(context.Principal, out _))
+                {
+                    if (!MeSessionLifecycle.TryCreateLegacySessionId(context.Principal, context.Properties, out var legacySessionId))
+                    {
+                        context.RejectPrincipal();
+                        return;
+                    }
+                    identity.AddClaim(new Claim(MeSessionLifecycle.SessionIdClaimType, legacySessionId));
+                    context.ShouldRenew = true;
+                }
+                var hasStartedAtClaim = context.Principal?.FindFirst(MeSessionLifecycle.StartedAtClaimType) is not null;
+                if (!MeSessionLifecycle.TryGetSessionStartedAt(context.Principal, context.Properties, out var startedAt))
+                {
+                    context.RejectPrincipal();
+                    return;
+                }
+                if (!hasStartedAtClaim)
+                {
+                    identity.AddClaim(new Claim(MeSessionLifecycle.StartedAtClaimType,
+                        startedAt.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                    context.ShouldRenew = true;
+                }
+            }
+            var absoluteExpired = MeSessionLifecycle.IsAbsoluteExpired(context.Principal, DateTimeOffset.UtcNow);
+            var remote = context.HttpContext.RequestServices.GetRequiredService<SessionStateClient>();
+            if (absoluteExpired)
+            {
+                if (MeSessionLifecycle.TryGetSessionId(context.Principal, out var expiredSid))
+                    await remote.RevokeAsync(expiredSid, context.HttpContext.RequestAborted);
+                context.RejectPrincipal();
+            }
+            else if (lifecycle.IsRevoked(context.Principal, context.Properties)
+                || (MeSessionLifecycle.TryGetSessionId(context.Principal, out var sid)
+                    && await remote.IsRevokedAsync(sid, context.HttpContext.RequestAborted)))
+            {
+                context.RejectPrincipal();
+            }
+
+            return;
+        };
     });
 
 // 会话 Cookie、防伪令牌由 DataProtection 保护；OIDC state 使用独立客户端密钥。
@@ -93,6 +139,24 @@ builder.Services.AddHealthChecks();
 
 // IDP 侧取值集中取出：OpenIddict 客户端注册与登出撤销客户端共用同一组配置，避免两份事实源。
 var issuer = new Uri(builder.Configuration["Auth:Issuer"] ?? "http://localhost:9004/");
+var sessionStateBase = builder.Configuration["Auth:IdpInternalBaseAddress"] ?? "http://127.0.0.1:9004/";
+if (!builder.Environment.IsDevelopment())
+{
+    var productionIssuer = builder.Configuration["Auth:Issuer"]?.Trim();
+    if (string.IsNullOrWhiteSpace(productionIssuer)
+        || string.Equals(productionIssuer, "http://localhost:9004/", StringComparison.OrdinalIgnoreCase)
+        || !Uri.TryCreate(productionIssuer, UriKind.Absolute, out var parsedIssuer)
+        || parsedIssuer.Scheme != Uri.UriSchemeHttps)
+        throw new InvalidOperationException("Auth:Issuer 缺失、格式无效或不是绝对 HTTPS URI（生产必须注入真实 issuer）。");
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Auth:IdpInternalBaseAddress"])
+        || string.Equals(sessionStateBase.TrimEnd('/'), "http://127.0.0.1:9004", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Auth:IdpInternalBaseAddress 缺失或仍是开发默认值（生产须注入 Server 内部地址）。");
+    if (!Uri.TryCreate(sessionStateBase, UriKind.Absolute, out var parsedInternal)
+        || (parsedInternal.Scheme != Uri.UriSchemeHttp && parsedInternal.Scheme != Uri.UriSchemeHttps))
+        throw new InvalidOperationException("Auth:IdpInternalBaseAddress 必须是绝对 HTTP(S) URI。");
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Auth:SessionState:ClientSecret"]))
+        throw new InvalidOperationException("缺少 Auth:SessionState:ClientSecret 配置（生产必须注入 Me 专用会话 API 密钥）。");
+}
 var clientId = builder.Configuration["Auth:ClientId"] ?? "me-web";
 // 机密客户端密钥失败关闭：缺失/为空即拒绝启动，不回退明文默认值（与 server 侧 Seeder 行为对齐）。
 var clientSecret = builder.Configuration["Auth:ClientSecret"];
@@ -125,6 +189,14 @@ if (portalHomeLabel.Length > 32)
 // 登出撤销客户端。超时取值的读取与校验都在 AddTokenRevocation 内、启动期完成——
 // 不能留给 AddHttpClient 的 configure 委托（它只在解析该类型时才执行，见该方法的注释）。
 builder.Services.AddTokenRevocation(builder.Configuration, new TokenRevocationOptions(issuer, clientId, clientSecret));
+builder.Services.AddHttpClient("session-state", client =>
+{
+    client.BaseAddress = new Uri(sessionStateBase);
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddSingleton(services => new SessionStateClient(
+    services.GetRequiredService<IHttpClientFactory>().CreateClient("session-state"),
+    services.GetRequiredService<IConfiguration>()));
 
 builder.Services.AddOpenIddict()
     .AddClient(options =>
@@ -262,6 +334,8 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
 
     // 令牌名称取自 SessionTokens：写入侧（此处）与读取侧（登出撤销）必须同名，否则登出会「看起来成功但没撤」。
     var properties = new AuthenticationProperties();
+    identity.AddClaim(new Claim(MeSessionLifecycle.SessionIdClaimType, MeSessionLifecycle.NewSessionId()));
+    identity.AddClaim(new Claim(MeSessionLifecycle.StartedAtClaimType, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)));
     var refreshToken = result.Properties.GetTokenValue(SessionTokens.RefreshTokenName);
     var tokens = new List<AuthenticationToken>();
     var accessToken = result.Properties.GetTokenValue(SessionTokens.AccessTokenName);
@@ -283,7 +357,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
 });
 
 // 退出：撤销 Cookie 中的 IDP 令牌 → 清本服务会话 → RP 发起 end-session（IDP 统一单点登出）。
-app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforgery, TokenRevocationClient revocationClient) =>
+app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforgery, TokenRevocationClient revocationClient, MeSessionLifecycle sessionLifecycle, SessionStateClient sessionStateClient) =>
 {
     try
     {
@@ -297,8 +371,17 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     // 撤销必须排在 SignOutAsync 之前：Cookie 一清，票据里的令牌就再也取不回来了。
     // 取法与回调侧写入对称（SessionTokens.Read）；未登录或票据无令牌时得到 (null, null)，
     // 撤销客户端会跳过、不发请求。撤销失败只记 warning，不阻断下面的登出。
-    var (accessToken, refreshToken) = SessionTokens.Read(
-        await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme));
+    var session = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    var (accessToken, refreshToken) = SessionTokens.Read(session);
+    sessionLifecycle.Revoke(session.Principal ?? context.User, session.Properties);
+    if (MeSessionLifecycle.TryGetSessionId(session.Principal ?? context.User, out var sessionId))
+    {
+        try { await sessionStateClient.RevokeAsync(sessionId, context.RequestAborted); }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "会话撤销服务不可用");
+        }
+    }
     await revocationClient.RevokeAsync(
         accessToken,
         refreshToken,
