@@ -118,27 +118,63 @@ public class SessionCookieTokenTests
         Assert.Equal($"{NoToken}|{NoToken}", await browser.GetStringAsync("read"));
     }
 
+    [Fact]
+    public async Task Logout_InvalidatesConcurrentSlidingRenewalEvenIfRenewalResponseArrivesLast()
+    {
+        await using var host = await TestHost.StartAsync(expireTimeSpan: TimeSpan.FromMinutes(10));
+        using var browser = host.CreateBrowser();
+        await browser.GetAsync("signin");
+
+        var renewal = browser.GetAsync("renew-delayed");
+        await host.RenewalValidated;
+
+        using var logout = await browser.PostAsync("logout", new StringContent(string.Empty));
+        Assert.Equal($"{AccessToken}|{RefreshToken}", await logout.Content.ReadAsStringAsync());
+
+        host.CompleteRenewal();
+        using var renewalResponse = await renewal;
+        Assert.True(renewalResponse.Headers.Contains("Set-Cookie"));
+        Assert.Equal($"{NoToken}|{NoToken}", await browser.GetStringAsync("read"));
+    }
+
     /// <summary>最小真实宿主：只装 Cookie 认证，读写两侧与 Program.cs 用同一组 API 与常量。</summary>
     private sealed class TestHost : IAsyncDisposable
     {
         private readonly WebApplication _app;
+        private readonly TaskCompletionSource<bool> _renewalValidated = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _continueRenewal = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private TestHost(WebApplication app, CookieContainer cookies, Uri baseAddress)
+        private TestHost(
+            WebApplication app,
+            CookieContainer cookies,
+            Uri baseAddress,
+            TaskCompletionSource<bool> renewalValidated,
+            TaskCompletionSource<bool> continueRenewal)
         {
             _app = app;
             Cookies = cookies;
             BaseAddress = baseAddress;
+            _renewalValidated = renewalValidated;
+            _continueRenewal = continueRenewal;
         }
 
         public CookieContainer Cookies { get; }
 
         public Uri BaseAddress { get; }
 
+        public Task RenewalValidated => _renewalValidated.Task;
+
+        public void CompleteRenewal() => _continueRenewal.TrySetResult(true);
+
         public static async Task<TestHost> StartAsync(TimeSpan? expireTimeSpan = null)
         {
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.UseUrls("http://127.0.0.1:0");
+            var lifecycle = new MeSessionLifecycle();
+            var renewalValidated = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var continueRenewal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            builder.Services.AddSingleton(lifecycle);
             builder.Services
                 .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
                 .AddCookie(options =>
@@ -153,6 +189,11 @@ public class SessionCookieTokenTests
                     // 用于逼出「滑动续期与清 Cookie 落在同一响应」这一交互。
                     options.ExpireTimeSpan = expireTimeSpan ?? TimeSpan.FromHours(8);
                     options.SlidingExpiration = true;
+                    options.Events.OnValidatePrincipal = context =>
+                    {
+                        if (lifecycle.IsRevoked(context.Principal, context.Properties)) context.RejectPrincipal();
+                        return Task.CompletedTask;
+                    };
                 });
 
             var app = builder.Build();
@@ -172,7 +213,11 @@ public class SessionCookieTokenTests
                 }
                 await context.SignInAsync(
                     CookieAuthenticationDefaults.AuthenticationScheme,
-                    new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "user-1")], CookieAuthenticationDefaults.AuthenticationScheme)),
+                    new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim("sub", "user-1"),
+                        new Claim(MeSessionLifecycle.SessionIdClaimType, "session-user-1"),
+                    ], CookieAuthenticationDefaults.AuthenticationScheme)),
                     properties);
                 return Results.Ok();
             });
@@ -188,10 +233,26 @@ public class SessionCookieTokenTests
             // 登出端点的等价物：先取令牌（触发认证），再清会话 Cookie；回显取到的令牌以便测试判定会话是活的。
             app.MapPost("logout", async (HttpContext context) =>
             {
-                var (accessToken, refreshToken) = SessionTokens.Read(
-                    await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme));
+                var session = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                var (accessToken, refreshToken) = SessionTokens.Read(session);
+                lifecycle.Revoke(session.Principal ?? context.User, session.Properties);
                 await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
                 return Results.Text($"{accessToken ?? NoToken}|{refreshToken ?? NoToken}");
+            });
+
+            app.MapGet("renew-delayed", async (HttpContext context) =>
+            {
+                var session = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                renewalValidated.TrySetResult(true);
+                await continueRenewal.Task;
+                if (session.Principal is not null)
+                {
+                    await context.SignInAsync(
+                        CookieAuthenticationDefaults.AuthenticationScheme,
+                        session.Principal,
+                        session.Properties ?? new AuthenticationProperties());
+                }
+                return Results.Ok();
             });
 
             // 读取侧就是登出端点里的那一行：SessionTokens.Read(AuthenticateAsync(会话方案))。
@@ -204,7 +265,7 @@ public class SessionCookieTokenTests
 
             await app.StartAsync();
             var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
-            return new TestHost(app, new CookieContainer(), new Uri(address));
+            return new TestHost(app, new CookieContainer(), new Uri(address), renewalValidated, continueRenewal);
         }
 
         public HttpClient CreateBrowser()

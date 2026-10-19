@@ -11,6 +11,10 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
         headers["Referrer-Policy"] = "no-referrer";
         headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'";
         headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+        if (context.Request.IsHttps) headers.StrictTransportSecurity = "max-age=31536000";
+        if (context.Request.Path.StartsWithSegments("/me/api")
+            || context.Request.Path.StartsWithSegments("/me/callback"))
+            headers.CacheControl = "no-store";
 
         await next(context);
     }

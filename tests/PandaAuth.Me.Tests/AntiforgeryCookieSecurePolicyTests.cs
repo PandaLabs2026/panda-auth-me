@@ -34,6 +34,12 @@ public class AntiforgeryCookieSecurePolicyTests
             builder.UseEnvironment(environment);
             // Program.cs 对机密客户端密钥失败关闭，Production 无 Development 覆盖文件，须显式注入。
             builder.UseSetting("Auth:ClientSecret", "unit-test-secret");
+            if (environment == "Production")
+            {
+                builder.UseSetting("Auth:Issuer", "https://auth.example.invalid/");
+                builder.UseSetting("Auth:IdpInternalBaseAddress", "http://127.0.0.1:6000/");
+                builder.UseSetting("Auth:SessionState:ClientSecret", "unit-test-session-secret");
+            }
         });
 
     [Fact]

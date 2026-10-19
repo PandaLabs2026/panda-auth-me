@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout"
 
 /**
  * 认证会话（真实 BFF 版，对齐模板 v0.5.0 会话层契约）：
@@ -48,43 +49,65 @@ export function handleUnauthorized() {
   onSessionExpired?.(window.location.pathname)
 }
 
+async function responseError(response: Response): Promise<Error> {
+  let message = "请求失败(HTTP " + response.status + ")"
+  try {
+    const problem = (await response.json()) as { detail?: string; title?: string }
+    message = problem.detail ?? problem.title ?? message
+  } catch {
+    // Keep the status fallback for empty or non-JSON failures.
+  }
+  return new Error(message)
+}
+
 export const sessionApi = {
   /** 会话探测：未登录/会话失效（401）静默收敛为 null，守卫据此送 /login 桥接页。 */
   async me(): Promise<Session | null> {
-    let res: Response
-    try {
-      res = await fetch("/me/api/session", { headers: { "X-Requested-With": "XMLHttpRequest" } })
-    } catch {
-      return null
-    }
-    if (res.status === 401) return null
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const raw = (await res.json()) as BffSession
-    return {
-      displayName: raw.nickname ?? raw.name ?? raw.subject,
-      email: raw.email ?? undefined,
-      roles: raw.roles,
-      accountEntryUrl: null,
-      subject: raw.subject,
-      appHomeUrl: raw.appHomeUrl,
-      appHomeLabel: raw.appHomeLabel,
-    }
+    return fetchWithTimeout(
+      "/me/api/session",
+      { headers: { "X-Requested-With": "XMLHttpRequest" } },
+      async (res) => {
+        if (res.status === 401) return null
+        if (!res.ok) throw await responseError(res)
+        if (!(res.headers.get("content-type") ?? "").includes("application/json")) return null
+        const raw = (await res.json()) as BffSession
+        return {
+          displayName: raw.nickname ?? raw.name ?? raw.subject,
+          email: raw.email ?? undefined,
+          roles: raw.roles,
+          accountEntryUrl: null,
+          subject: raw.subject,
+          appHomeUrl: raw.appHomeUrl,
+          appHomeLabel: raw.appHomeLabel,
+        }
+      },
+      10_000,
+    )
   },
 
   /** 登出：防伪令牌成对 POST（注意 BFF 头是 X-XSRF-Token，IDP MFA 端点才是 RequestVerificationToken）。 */
   async logout(): Promise<void> {
-    try {
-      const res = await fetch("/me/api/antiforgery")
-      if (res.ok) {
-        const { token } = (await res.json()) as { token: string }
-        await fetch("/me/api/logout", {
-          method: "POST",
-          headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
-        })
-      }
-    } finally {
-      window.location.assign("/me/login")
-    }
+    const token = await fetchWithTimeout(
+      "/me/api/antiforgery",
+      {},
+      async (antiforgery) => {
+        if (!antiforgery.ok) throw await responseError(antiforgery)
+        return ((await antiforgery.json()) as { token: string }).token
+      },
+      10_000,
+    )
+    await fetchWithTimeout(
+      "/me/api/logout",
+      {
+        method: "POST",
+        headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
+      },
+      async (response) => {
+        if (!response.ok) throw await responseError(response)
+      },
+      10_000,
+    )
+    window.location.assign("/me/login")
   },
 }
 
