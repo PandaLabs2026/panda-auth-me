@@ -136,6 +136,8 @@ if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
 
 builder.Services.AddAuthorization();
 builder.Services.AddHealthChecks();
+// Revocations must remain visible across cookie validation and logout request scopes.
+builder.Services.AddSingleton<MeSessionLifecycle>();
 
 // IDP 侧取值集中取出：OpenIddict 客户端注册与登出撤销客户端共用同一组配置，避免两份事实源。
 var issuer = new Uri(builder.Configuration["Auth:Issuer"] ?? "http://localhost:9004/");
