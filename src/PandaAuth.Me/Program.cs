@@ -62,6 +62,12 @@ builder.Services
         options.SlidingExpiration = true;
         options.Events.OnValidatePrincipal = async context =>
         {
+            var linkedSid = context.Principal?.FindFirstValue(PandaAuthClaims.SsoSessionId);
+            if (!Guid.TryParseExact(linkedSid, "N", out _))
+            {
+                context.RejectPrincipal();
+                return;
+            }
             var lifecycle = context.HttpContext.RequestServices.GetRequiredService<MeSessionLifecycle>();
             var identity = context.Principal?.Identity as ClaimsIdentity;
             if (identity is not null)
@@ -99,7 +105,8 @@ builder.Services
             }
             else if (lifecycle.IsRevoked(context.Principal, context.Properties)
                 || (MeSessionLifecycle.TryGetSessionId(context.Principal, out var sid)
-                    && await remote.IsRevokedAsync(sid, context.HttpContext.RequestAborted)))
+                    && await remote.IsRevokedAsync(sid, context.HttpContext.RequestAborted))
+                || await remote.IsLoginRevokedAsync(linkedSid!, context.HttpContext.RequestAborted))
             {
                 context.RejectPrincipal();
             }
@@ -324,7 +331,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     {
         identity.AddClaim(new Claim(PandaAuthClaims.Nickname, nickname));
     }
-    foreach (var claimType in new[] { PandaAuthClaims.TenantId, PandaAuthClaims.TenantHost })
+    foreach (var claimType in new[] { PandaAuthClaims.TenantId, PandaAuthClaims.TenantHost, PandaAuthClaims.SsoSessionId })
     {
         var value = result.Principal.GetClaim(claimType);
         if (!string.IsNullOrEmpty(value))
@@ -336,6 +343,8 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
 
     // 令牌名称取自 SessionTokens：写入侧（此处）与读取侧（登出撤销）必须同名，否则登出会「看起来成功但没撤」。
     var properties = new AuthenticationProperties();
+    var linkedSid = identity.FindFirst(PandaAuthClaims.SsoSessionId)?.Value;
+    if (!Guid.TryParseExact(linkedSid, "N", out _)) return Results.StatusCode(403);
     identity.AddClaim(new Claim(MeSessionLifecycle.SessionIdClaimType, MeSessionLifecycle.NewSessionId()));
     identity.AddClaim(new Claim(MeSessionLifecycle.StartedAtClaimType, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)));
     var refreshToken = result.Properties.GetTokenValue(SessionTokens.RefreshTokenName);
@@ -375,15 +384,20 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     // 撤销客户端会跳过、不发请求。撤销失败只记 warning，不阻断下面的登出。
     var session = await context.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     var (accessToken, refreshToken) = SessionTokens.Read(session);
-    sessionLifecycle.Revoke(session.Principal ?? context.User, session.Properties);
+
     if (MeSessionLifecycle.TryGetSessionId(session.Principal ?? context.User, out var sessionId))
     {
-        try { await sessionStateClient.RevokeAsync(sessionId, context.RequestAborted); }
+        try
+        {
+            await sessionStateClient.RevokeLoginAsync(context.User.FindFirstValue(PandaAuthClaims.SsoSessionId)!, context.RequestAborted);
+            await sessionStateClient.RevokeAsync(sessionId, context.RequestAborted);
+        }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
         {
             return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "会话撤销服务不可用");
         }
     }
+    sessionLifecycle.Revoke(session.Principal ?? context.User, session.Properties);
     await revocationClient.RevokeAsync(
         accessToken,
         refreshToken,

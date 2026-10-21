@@ -32,7 +32,8 @@ public sealed class SessionLifecycleRuntimeTests
         var now = DateTimeOffset.UtcNow;
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim("sub", "fixture-user"),
-            new Claim(MeSessionLifecycle.SessionIdClaimType, "fixture-session"),
+            new Claim(MeSessionLifecycle.SessionIdClaimType, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            new Claim(PandaAuth.Shared.PandaAuthClaims.SsoSessionId, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             new Claim(MeSessionLifecycle.StartedAtClaimType, now.ToUnixTimeSeconds().ToString()),
         ], CookieAuthenticationDefaults.AuthenticationScheme));
         var properties = new AuthenticationProperties { IssuedUtc = now, ExpiresUtc = now.AddHours(1) };
