@@ -389,7 +389,8 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     {
         try
         {
-            await sessionStateClient.RevokeLoginAsync(context.User.FindFirstValue(PandaAuthClaims.SsoSessionId)!, context.RequestAborted);
+            if (context.RequestServices.GetRequiredService<IConfiguration>().GetValue<bool>(PandaAuthSessionApi.SharedLogoutEnabled))
+                    await sessionStateClient.RevokeLoginAsync(context.User.FindFirstValue(PandaAuthClaims.SsoSessionId)!, context.RequestAborted);
             await sessionStateClient.RevokeAsync(sessionId, context.RequestAborted);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
