@@ -22,8 +22,11 @@ public sealed class SessionLifecycleRuntimeTests
             builder.UseEnvironment("Development");
             builder.UseSetting("Auth:ClientSecret", "fixture-secret");
             builder.UseSetting("Auth:SessionState:ClientSecret", "fixture-session-secret");
-            builder.ConfigureServices(services => services.AddHttpClient("session-state")
-                .ConfigurePrimaryHttpMessageHandler(() => new SessionStateHandler()));
+            builder.ConfigureServices(services =>
+            {
+                services.AddHttpClient("session-state").ConfigurePrimaryHttpMessageHandler(() => new SessionStateHandler());
+                services.AddHttpClient(MeSessionValidator.ClientName).ConfigurePrimaryHttpMessageHandler(() => new SessionStateHandler());
+            });
         });
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -37,6 +40,7 @@ public sealed class SessionLifecycleRuntimeTests
             new Claim(MeSessionLifecycle.StartedAtClaimType, now.ToUnixTimeSeconds().ToString()),
         ], CookieAuthenticationDefaults.AuthenticationScheme));
         var properties = new AuthenticationProperties { IssuedUtc = now, ExpiresUtc = now.AddHours(1) };
+        properties.StoreTokens([new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = "fixture-access" }]);
         var options = factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(CookieAuthenticationDefaults.AuthenticationScheme);
         var ticket = options.TicketDataFormat.Protect(new AuthenticationTicket(principal, properties,
@@ -58,6 +62,7 @@ public sealed class SessionLifecycleRuntimeTests
             {
                 Content = new StringContent(request.RequestUri!.AbsolutePath == "/connect/token"
                     ? "{\"access_token\":\"fixture-token\",\"expires_in\":300}"
+                    : request.RequestUri.AbsolutePath == PandaAuth.Shared.PandaAuthEndpoints.Userinfo ? "{\"sub\":\"fixture-user\"}"
                     : "{\"revoked\":false}", Encoding.UTF8, "application/json"),
             });
     }
