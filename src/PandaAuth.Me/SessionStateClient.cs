@@ -27,6 +27,24 @@ public sealed class SessionStateClient(HttpClient http, IConfiguration configura
         response.EnsureSuccessStatusCode();
     }
 
+    public async Task<bool> IsLoginRevokedAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParseExact(sessionId, "N", out _)) throw new ArgumentException("Invalid login session identifier.", nameof(sessionId));
+        using var request = await CreateRequestAsync(PandaAuthSessionApi.SsoCheck, new SessionStateCheckRequest(sessionId), cancellationToken);
+        using var response = await http.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SessionStateCheckResponse>(cancellationToken: cancellationToken)
+            ?? throw new InvalidOperationException("Shared session-state check returned an empty response.")).Revoked;
+    }
+
+    public async Task RevokeLoginAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParseExact(sessionId, "N", out _)) throw new ArgumentException("Invalid login session identifier.", nameof(sessionId));
+        using var request = await CreateRequestAsync(PandaAuthSessionApi.SsoRevoke, new SessionStateRevokeRequest(sessionId), cancellationToken);
+        using var response = await http.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
     private async Task<HttpRequestMessage> CreateRequestAsync<T>(string path, T body, CancellationToken cancellationToken)
     {
         var token = await GetTokenAsync(cancellationToken);
