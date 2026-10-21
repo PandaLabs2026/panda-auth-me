@@ -206,6 +206,10 @@ builder.Services.AddHttpClient("session-state", client =>
 builder.Services.AddSingleton(services => new SessionStateClient(
     services.GetRequiredService<IHttpClientFactory>().CreateClient("session-state"),
     services.GetRequiredService<IConfiguration>()));
+builder.Services.AddHttpClient(MeSessionValidator.ClientName, client => client.Timeout = TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton<IMeSessionRefresher, MeSessionRefresher>();
+builder.Services.AddSingleton<MeSessionValidator>();
 
 builder.Services.AddOpenIddict()
     .AddClient(options =>
@@ -341,7 +345,8 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     }
     identity.AddClaims(result.Principal.FindAll(Claims.Role));
 
-    // 令牌名称取自 SessionTokens：写入侧（此处）与读取侧（登出撤销）必须同名，否则登出会「看起来成功但没撤」。
+    // OpenIddict 返回的 AT 使用 backchannel_access_token；自有票据统一写 SessionTokens 的键。
+    // 旧版可能只保存 RT，会话校验可经真实刷新补齐 AT，避免升级后强迫有效会话重新登录。
     var properties = new AuthenticationProperties();
     var linkedSid = identity.FindFirst(PandaAuthClaims.SsoSessionId)?.Value;
     if (!Guid.TryParseExact(linkedSid, "N", out _)) return Results.StatusCode(403);
@@ -349,7 +354,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     identity.AddClaim(new Claim(MeSessionLifecycle.StartedAtClaimType, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture)));
     var refreshToken = result.Properties.GetTokenValue(SessionTokens.RefreshTokenName);
     var tokens = new List<AuthenticationToken>();
-    var accessToken = result.Properties.GetTokenValue(SessionTokens.AccessTokenName);
+    var accessToken = result.Properties.GetTokenValue("backchannel_access_token");
     if (accessToken is not null)
     {
         tokens.Add(new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = accessToken });
@@ -412,13 +417,14 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
 });
 
 // 会话查询（SPA 用）：未登录 401，前端引导跳 /me/login。
-app.MapGet("/me/api/session", (HttpContext context) =>
+app.MapGet("/me/api/session", async (HttpContext context, MeSessionValidator validator) =>
 {
     if (context.User.Identity?.IsAuthenticated != true)
     {
         return Results.Unauthorized();
     }
 
+    if (await validator.ValidateAsync(context, TenantOidcRouting.ResolveIssuer(context.Request, issuer), context.RequestAborted) is { } failure) return failure;
     return Results.Ok(new
     {
         subject = context.User.FindFirst(Claims.Subject)?.Value,
