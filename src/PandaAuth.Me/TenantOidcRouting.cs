@@ -1,3 +1,5 @@
+using PandaAuth.Shared;
+
 namespace PandaAuth.Me;
 
 public static class TenantOidcRouting
@@ -5,14 +7,13 @@ public static class TenantOidcRouting
     public static Uri ResolveIssuer(HttpRequest request, Uri platformIssuer)
     {
         var host = request.Host.Host;
-        const string suffix = ".auth.pandalabs.cn";
-        if (!host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        if (!TenantCanonicalHost.TryParse(host, out _, out var product, out _) ||
+            product != TenantProduct.PandaAuth)
+        {
             return platformIssuer;
+        }
 
-        var prefix = host[..^suffix.Length];
-        if (prefix.Length != 5 || char.ToLowerInvariant(prefix[0]) != 't' || !prefix[1..].All(char.IsDigit))
-            throw new InvalidOperationException($"非法 PandaAuth 租户 Host：{host}");
-
-        return new Uri($"{request.Scheme}://{host}/");
+        // 规范租户主机：issuer 与主机同源。尾点归一，避免与 IDP 的 issuer 完全匹配失败。
+        return new Uri($"{request.Scheme}://{host.TrimEnd('.')}/");
     }
 }
