@@ -195,6 +195,9 @@ if (portalHomeLabel.Length > 32)
     throw new InvalidOperationException("Auth:AppHomeLabel（或弃用别名 Auth:PortalHomeLabel）超过 32 字符；请修正或移除该配置。");
 }
 
+// 租户主机校验总开关：默认关闭，与服务端/Auth Admin 同一发布节奏（ADR-090 卫生批迁移至规范主机解析）。
+var tenantRoutingEnabled = builder.Configuration.GetValue<bool>("Auth:TenantRouting:Enabled");
+
 // 登出撤销客户端。超时取值的读取与校验都在 AddTokenRevocation 内、启动期完成——
 // 不能留给 AddHttpClient 的 configure 委托（它只在解析该类型时才执行，见该方法的注释）。
 builder.Services.AddTokenRevocation(builder.Configuration, new TokenRevocationOptions(issuer, clientId, clientSecret));
@@ -309,7 +312,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
         return Results.Redirect("/me/");
     }
 
-    if (!TenantHostContext.TryValidate(context, result.Principal, out _))
+    if (!TenantHostContext.TryValidate(context, result.Principal, out _, tenantRoutingEnabled))
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return Results.Content(

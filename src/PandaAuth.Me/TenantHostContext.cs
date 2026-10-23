@@ -4,64 +4,65 @@ using PandaAuth.Shared;
 namespace PandaAuth.Me;
 
 /// <summary>校验 PandaAuth Me 当前请求主机与会话中的租户声明是否一致。</summary>
+/// <remarks>
+/// 规范租户主机是 t####-auth.sNNN.pandalabs.cn；旧的 t####.auth.pandalabs.cn 已随 ADR-061 退役
+/// （其推导分支于 ADR-090 卫生批 2026-10-24 移除，本文件迁移至共享解析器，与 Auth Admin 同构）。
+/// 平台/遗留主机（如 auth.appliket.com、localhost）没有租户语义，直接放行；
+/// 只有能被共享解析器识别为规范租户主机时才要求 claims 与主机一致。
+/// 总开关 Auth:TenantRouting:Enabled 默认 false，与服务端/Admin 保持同一发布节奏。
+/// </remarks>
 public static class TenantHostContext
 {
-    private const string PlatformHost = "auth.pandalabs.cn";
-
-    public static bool TryValidate(HttpContext context, ClaimsPrincipal principal, out string? reason)
+    public static bool TryValidate(
+        HttpContext context, ClaimsPrincipal principal, out string? reason, bool enabled = true)
     {
+        reason = null;
+        if (!enabled) return true;
+
         var host = context.Request.Host.Host;
-        if (string.Equals(host, PlatformHost, StringComparison.OrdinalIgnoreCase) ||
-            !LooksLikeTenantHost(host))
+        if (IsLocalHost(host)) return true;
+
+        // 非规范主机（平台域/遗留域/内网别名）没有租户语义，放行；规范主机必须自证。
+        if (!TenantCanonicalHost.TryParse(host, out var tenantId, out var product, out _) ||
+            product != TenantProduct.PandaAuth)
         {
-            reason = null;
             return true;
         }
 
-        var suffix = ".auth.pandalabs.cn";
-        var prefix = host[..^suffix.Length];
-        TenantId tenantId;
-        try
-        {
-            tenantId = TenantId.Parse(prefix);
-        }
-        catch (FormatException)
-        {
-            reason = TenantContextErrors.UnknownHost;
-            return false;
-        }
-
-        if (!string.Equals(principal.FindFirstValue(PandaAuthClaims.TenantId), tenantId.Value, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(principal.FindFirstValue(PandaAuthClaims.TenantHost), host, StringComparison.OrdinalIgnoreCase))
+        var claimTenant = principal.FindFirstValue(PandaAuthClaims.TenantId);
+        var claimHost = principal.FindFirstValue(PandaAuthClaims.TenantHost);
+        if (!string.Equals(claimTenant, tenantId.Value, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(claimHost, host.TrimEnd('.'), StringComparison.OrdinalIgnoreCase))
         {
             reason = TenantContextErrors.ContextMismatch;
             return false;
         }
 
-        reason = null;
         return true;
     }
 
-    public static bool LooksLikeTenantHost(string host) =>
-        host.EndsWith(".auth.pandalabs.cn", StringComparison.OrdinalIgnoreCase) &&
-        host.Length > ".auth.pandalabs.cn".Length;
+    public static bool IsLocalHost(string host)
+        => host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("::1", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("[::1]", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase);
 }
 
-/// <summary>已登录请求的租户主机边界；平台主机保留平台入口兼容行为。</summary>
-public sealed class TenantHostContextMiddleware(RequestDelegate next)
+/// <summary>已登录请求的租户主机边界；总开关关闭时保持既有单租户行为。</summary>
+public sealed class TenantHostContextMiddleware(RequestDelegate next, IConfiguration configuration)
 {
     public async Task InvokeAsync(HttpContext context)
     {
-        if ((context.Request.Path.StartsWithSegments("/me/login") ||
-             context.Request.Path.StartsWithSegments("/me/callback/login")) ||
+        if (IsAnonymousEntry(context.Request.Path) ||
             context.User.Identity?.IsAuthenticated != true)
         {
             await next(context);
             return;
         }
 
-        if (TenantHostContext.LooksLikeTenantHost(context.Request.Host.Host) &&
-            !TenantHostContext.TryValidate(context, context.User, out var reason))
+        if (configuration.GetValue<bool>("Auth:TenantRouting:Enabled") &&
+            !TenantHostContext.TryValidate(context, context.User, out var reason, enabled: true))
         {
             context.Response.StatusCode = reason == TenantContextErrors.UnknownHost
                 ? StatusCodes.Status421MisdirectedRequest
@@ -71,4 +72,8 @@ public sealed class TenantHostContextMiddleware(RequestDelegate next)
 
         await next(context);
     }
+
+    private static bool IsAnonymousEntry(PathString path) =>
+        path.StartsWithSegments("/me/login") ||
+        path.StartsWithSegments("/me/callback/login");
 }
