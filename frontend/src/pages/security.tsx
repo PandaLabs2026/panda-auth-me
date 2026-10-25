@@ -5,27 +5,33 @@ import ConfirmAction from "@/components/patterns/ConfirmAction"
 import PageHeader from "@/components/patterns/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
+import { GrantRequiredError, mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
 import { useI18n } from "@/lib/i18n"
-import { credentialToJson, toAssertionOptions, toCreationOptions } from "@/lib/webauthn"
-
-const passkeySupported = typeof window !== "undefined" && "PublicKeyCredential" in window
 
 /**
- * 安全设置：普通用户自助管理 MFA（Passkey / TOTP / 恢复码）。
- * 直连同源调用 IDP 的 /account/mfa/user/*；认证依赖 IDP 登录 Cookie，
- * 401 时由 mfa-api 统一跳转 /me/login 重新走 OIDC 登录。
- * 危险操作（撤销因子/重生成恢复码）走模板 ConfirmAction（结果经全局 notify）；
- * step-up 流程的提示保持页内常驻（5 分钟窗口语境需要持续可见）。
+ * 安全设置：普通用户自助管理 MFA（TOTP / 恢复码）。Passkey 已退役（AUTH-DELIVERY-002）：
+ * 存量 passkey 行仅展示与撤销（迁移动作，无需授权）；特敏感操作（更换 TOTP / 撤销 TOTP /
+ * 重生成恢复码）须先完成单次操作授权——TOTP 码 + 当前密码。授权对话框由服务端
+ * 403 mfaGrantRequired 信号驱动，签发参数回显自服务端响应，两端口径不漂移。
  */
 export default function SecurityPage() {
   const { t } = useI18n()
 
   function describeFactor(factor: MfaFactor): string {
     if (factor.type === "totp") return t("TOTP 验证器")
-    return factor.friendlyName ?? t("Passkey")
+    return factor.friendlyName
+      ? t("已退役 Passkey：{name}", { name: factor.friendlyName })
+      : t("已退役 Passkey")
   }
 
   const [status, setStatus] = useState<MfaStatus | null>(null)
@@ -38,7 +44,18 @@ export default function SecurityPage() {
   const [totpSetup, setTotpSetup] = useState<{ factorId: string; secret: string; provisioningUri: string } | null>(null)
   const [totpQrSvg, setTotpQrSvg] = useState<string | null>(null)
   const [totpCode, setTotpCode] = useState("")
-  const [totpAssertCode, setTotpAssertCode] = useState("")
+
+  // 操作授权对话框状态：由服务端 GrantRequiredError 驱动，retry 携带授权头重放原操作。
+  const [pendingGrant, setPendingGrant] = useState<{
+    operation: string
+    targetId: string
+    parameters: Record<string, string | null> | null
+    passwordRequired: boolean
+    retry: (grantId: string) => Promise<string | void>
+  } | null>(null)
+  const [grantCode, setGrantCode] = useState("")
+  const [grantPassword, setGrantPassword] = useState("")
+  const [grantError, setGrantError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -69,79 +86,106 @@ export default function SecurityPage() {
     }
   }
 
-  async function enrollPasskey(): Promise<string> {
-    const ceremony = await mfaApi.passkeyEnrollmentOptions()
-    const credential = await navigator.credentials.create({
-      publicKey: toCreationOptions(ceremony.publicKey),
-    })
-    if (!credential) throw new Error(t("未能创建 Passkey。"))
-    const completed = await mfaApi.passkeyEnrollmentComplete(
-      ceremony.ceremonyId,
-      credentialToJson(credential as PublicKeyCredential),
-    )
-    return t("Passkey 已注册，当前共 {count} 个。", { count: completed.activePasskeyCount })
-  }
-
-  async function stepUpWithPasskey(): Promise<string> {
-    const ceremony = await mfaApi.passkeyAssertionOptions()
-    const credential = await navigator.credentials.get({
-      publicKey: toAssertionOptions(ceremony.publicKey),
-    })
-    if (!credential) throw new Error(t("未能验证 Passkey。"))
-    await mfaApi.passkeyAssertionComplete(ceremony.ceremonyId, credentialToJson(credential as PublicKeyCredential))
-    return t("验证通过：5 分钟内可以继续敏感操作。")
-  }
-
-  async function stepUpWithTotp(): Promise<string> {
-    await mfaApi.totpAssert(totpAssertCode)
-    setTotpAssertCode("")
-    return t("验证通过：5 分钟内可以继续敏感操作。")
-  }
-
-  function onAddPasskey() {
-    if (!passkeySupported) {
-      setError(t("此浏览器不支持 Passkey，请使用系统自带的验证器（如 Windows Hello）。"))
-      return
-    }
-    void run("enroll-passkey", async () => {
+  /** 特敏感操作统一入口：先裸试，命中 403 授权标记则弹授权对话框，验证后带授权重放。 */
+  async function guarded(
+    key: string,
+    attempt: () => Promise<string | void>,
+    retry: (grantId: string) => Promise<string | void>,
+  ) {
+    setBusy(key)
+    setError(null)
+    setNotice(null)
+    try {
+      let message: string | void
       try {
-        return await enrollPasskey()
+        message = await attempt()
       } catch (cause) {
-        const message = (cause as Error).message
-        // mfa-api 的 403 兜底文案随 locale 双语（"当前条件不满足" / "Preconditions not met"），两者都要命中引导分支。
-        if (message.startsWith("当前条件不满足") || message.startsWith("Preconditions not met")) {
-          throw new Error(
-            status?.hasActiveFactor
-              ? t("添加新 Passkey 前需要先验证一个已有因子（5 分钟窗口）：请用 Passkey 或 TOTP 完成验证。")
-              : message,
-            { cause },
-          )
+        if (cause instanceof GrantRequiredError) {
+          setGrantCode("")
+          setGrantPassword("")
+          setGrantError(null)
+          setPendingGrant({
+            operation: cause.operation,
+            targetId: cause.targetId,
+            parameters: cause.parameters,
+            passwordRequired: cause.passwordRequired,
+            retry,
+          })
+          return
         }
         throw cause
       }
-    })
+      if (typeof message === "string") setNotice(message)
+      await load()
+    } catch (cause) {
+      setError((cause as Error).message)
+    } finally {
+      setBusy(null)
+    }
   }
 
-  function onStepUp() {
-    void run("step-up", stepUpWithPasskey)
+  async function submitGrant() {
+    if (!pendingGrant) return
+    setGrantError(null)
+    try {
+      const { grantId } = await mfaApi.requestGrant(
+        pendingGrant.operation,
+        pendingGrant.targetId,
+        pendingGrant.parameters,
+        grantCode,
+        pendingGrant.passwordRequired ? grantPassword : undefined,
+      )
+      const retry = pendingGrant.retry
+      const message = await retry(grantId)
+      setPendingGrant(null)
+      if (typeof message === "string") setNotice(message)
+      await load()
+    } catch (cause) {
+      setGrantError((cause as Error).message)
+    }
   }
 
-  function onStepUpWithTotp() {
-    void run("step-up-totp", stepUpWithTotp)
-  }
-
-  function onBeginTotp() {
-    void run("totp-begin", async () => {
-      const setup = await mfaApi.totpOptions()
-      setTotpSetup(setup)
-      setTotpCode("")
-      // SVG 字符串输出（非 canvas）：与 jsdom 测试环境兼容，展示更清晰。
+  function beginTotpSetup(setup: { factorId: string; secret: string; provisioningUri: string }) {
+    setTotpSetup(setup)
+    setTotpCode("")
+    void (async () => {
       try {
         setTotpQrSvg(await QRCode.toString(setup.provisioningUri, { type: "svg", margin: 1, width: 180 }))
       } catch {
         setTotpQrSvg(null)
       }
-    })
+    })()
+  }
+
+  function onBeginTotp() {
+    // 首次绑定（无可验证因子）不需要授权；更换（已有 TOTP）由服务端 403 引导进授权对话框。
+    setBusy("totp-begin")
+    setError(null)
+    setNotice(null)
+    void (async () => {
+      try {
+        beginTotpSetup(await mfaApi.totpOptions())
+      } catch (cause) {
+        if (cause instanceof GrantRequiredError) {
+          setGrantCode("")
+          setGrantPassword("")
+          setGrantError(null)
+          setPendingGrant({
+            operation: cause.operation,
+            targetId: cause.targetId,
+            parameters: cause.parameters,
+            passwordRequired: cause.passwordRequired,
+            retry: async (grantId) => {
+              beginTotpSetup(await mfaApi.totpOptions(grantId))
+            },
+          })
+          return
+        }
+        setError((cause as Error).message)
+      } finally {
+        setBusy(null)
+      }
+    })()
   }
 
   function onConfirmTotp() {
@@ -151,29 +195,36 @@ export default function SecurityPage() {
       setTotpSetup(null)
       setTotpQrSvg(null)
       setTotpCode("")
-      return t("TOTP 备用验证已启用。")
+      return t("TOTP 已启用。")
     })
   }
 
-  // 恢复码重生成与因子撤销:危险操作走 ConfirmAction,成功/失败反馈由组件归一到全局 notify。
-  async function generateRecoveryCodes() {
-    setRecoveryCodes(await mfaApi.recoveryCodes())
-    await load()
-  }
-
-  async function revokeFactor(factor: MfaFactor) {
-    await mfaApi.revokeFactor(factor.id)
+  async function generateRecoveryCodes(grantId?: string) {
+    const codes = await mfaApi.recoveryCodes(grantId)
+    setRecoveryCodes(codes)
     await load()
   }
 
   const hasTotp = factors.some((factor) => factor.type === "totp")
-  const hasPasskey = factors.some((factor) => factor.type === "passkey")
+  const totpCount = factors.filter((factor) => factor.type === "totp").length
+
+  function grantDialogTitle(): string {
+    if (!pendingGrant) return ""
+    if (pendingGrant.operation === "self.totp-enroll") return t("更换 TOTP")
+    if (pendingGrant.operation === "self.revoke-factor") return t("撤销 TOTP")
+    return t("生成新恢复码")
+  }
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t("安全设置")} description={t("管理 Passkey、TOTP 与恢复码；敏感操作前需要完成一次因子验证。")} />
+      <PageHeader
+        title={t("安全设置")}
+        description={t("管理 TOTP 验证器与恢复码；敏感操作需要验证码和当前密码。")}
+      />
 
-      {loading && <p role="status" className="text-muted-foreground">{t("加载中…")}</p>}
+      {loading && (
+        <p role="status" className="text-muted-foreground">{t("加载中…")}</p>
+      )}
       {!loading && (
         <>
           {error && (
@@ -197,9 +248,8 @@ export default function SecurityPage() {
               <CardTitle>{t("多因素验证")}</CardTitle>
               <CardDescription>
                 {status?.hasActiveFactor
-                  ? t("已启用：{passkeyCount} 个 Passkey、{totpCount} 个 TOTP、{recoveryCodeCount} 个未用恢复码", {
-                      passkeyCount: status.activePasskeyCount,
-                      totpCount: factors.filter((f) => f.type === "totp").length,
+                  ? t("已启用：{totpCount} 个 TOTP、{recoveryCodeCount} 个未用恢复码", {
+                      totpCount,
                       recoveryCodeCount: status.recoveryCodeCount,
                     })
                   : t("尚未启用。启用后可在敏感操作前要求第二重验证。")}
@@ -210,105 +260,56 @@ export default function SecurityPage() {
           <div className="grid gap-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">{t("Passkey")}</CardTitle>
-                <CardDescription>
-                  {passkeySupported
-                    ? t("使用平台验证器（Windows Hello / 触控 ID），设备会要求生物识别或 PIN。")
-                    : t("此浏览器不支持 Passkey，请使用系统自带浏览器的最新版本。")}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex gap-2">
-                <Button size="sm" disabled={!passkeySupported || busy !== null} onClick={onAddPasskey}>
-                  {busy === "enroll-passkey" ? t("注册中…") : t("添加 Passkey")}
-                </Button>
-                {status?.hasActiveFactor && hasPasskey && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!passkeySupported || busy !== null}
-                    onClick={onStepUp}
-                  >
-                    {busy === "step-up" ? t("验证中…") : t("先验证已有因子")}
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">{t("TOTP 备用验证")}</CardTitle>
+                <CardTitle className="text-sm">{t("TOTP 验证器")}</CardTitle>
                 <CardDescription>
                   {hasTotp
-                    ? t("已配置 TOTP 验证器。如需更换，请先在下方因子列表中撤销现有 TOTP。")
+                    ? t("已配置 TOTP 验证器。更换需验证当前验证码与登录密码；旧验证器在新验证器确认前保持可用。")
                     : t("使用认证器 App（如 Microsoft Authenticator）扫描或手动录入密钥。")}
                 </CardDescription>
               </CardHeader>
-              {hasTotp && (
-                <CardContent className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    {t("敏感操作前可用 TOTP 验证码完成验证（打开 5 分钟窗口）。")}
-                  </p>
-                  <div className="space-y-1">
-                    <Label htmlFor="totp-assert-code">{t("输入认证器 6 位验证码")}</Label>
-                    <Input
-                      id="totp-assert-code"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      maxLength={6}
-                      value={totpAssertCode}
-                      onChange={(event) => setTotpAssertCode(event.target.value)}
-                    />
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy !== null || totpAssertCode.length !== 6}
-                    onClick={onStepUpWithTotp}
-                  >
-                    {busy === "step-up-totp" ? t("验证中…") : t("验证 TOTP")}
+              <CardContent className="space-y-3">
+                {!totpSetup && (
+                  <Button variant="outline" size="sm" disabled={busy !== null} onClick={onBeginTotp}>
+                    {busy === "totp-begin"
+                      ? t("生成中…")
+                      : hasTotp
+                        ? t("更换 TOTP")
+                        : t("开始配置 TOTP")}
                   </Button>
-                </CardContent>
-              )}
-              {!hasTotp && (
-                <CardContent className="space-y-3">
-                  {!totpSetup ? (
-                    <Button variant="outline" size="sm" disabled={busy !== null} onClick={onBeginTotp}>
-                      {busy === "totp-begin" ? t("生成中…") : t("开始配置 TOTP")}
-                    </Button>
-                  ) : (
-                    <>
-                      {totpQrSvg && (
-                        <div className="text-sm">
-                          <p className="mb-1 text-muted-foreground">{t("用认证器 App 扫码录入：")}</p>
-                          <div
-                            className="inline-block rounded-md bg-white p-2 [&>svg]:block [&>svg]:h-44 [&>svg]:w-44"
-                            // 内容为本地生成的 SVG 二维码（来源：本页 provisioningUri），无不可信输入
-                            dangerouslySetInnerHTML={{ __html: totpQrSvg }}
-                          />
-                        </div>
-                      )}
+                )}
+                {totpSetup && (
+                  <>
+                    {totpQrSvg && (
                       <div className="text-sm">
-                        <p className="mb-1 text-muted-foreground">{t("或手动添加密钥：")}</p>
-                        <code className="break-all rounded bg-muted px-2 py-1">{totpSetup.secret}</code>
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="totp-code">{t("输入认证器 6 位验证码以确认")}</Label>
-                        <Input
-                          id="totp-code"
-                          inputMode="numeric"
-                          autoComplete="one-time-code"
-                          maxLength={6}
-                          value={totpCode}
-                          onChange={(event) => setTotpCode(event.target.value)}
+                        <p className="mb-1 text-muted-foreground">{t("用认证器 App 扫码录入：")}</p>
+                        <div
+                          className="inline-block rounded-md bg-white p-2 [&>svg]:block [&>svg]:h-44 [&>svg]:w-44"
+                          // 内容为本地生成的 SVG 二维码（来源：本页 provisioningUri），无不可信输入
+                          dangerouslySetInnerHTML={{ __html: totpQrSvg }}
                         />
                       </div>
-                      <Button size="sm" disabled={busy !== null || totpCode.length !== 6} onClick={onConfirmTotp}>
-                        {busy === "totp-confirm" ? t("确认中…") : t("确认 TOTP")}
-                      </Button>
-                    </>
-                  )}
-                </CardContent>
-              )}
+                    )}
+                    <div className="text-sm">
+                      <p className="mb-1 text-muted-foreground">{t("或手动添加密钥：")}</p>
+                      <code className="break-all rounded bg-muted px-2 py-1">{totpSetup.secret}</code>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="totp-code">{t("输入认证器 6 位验证码以确认")}</Label>
+                      <Input
+                        id="totp-code"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        value={totpCode}
+                        onChange={(event) => setTotpCode(event.target.value)}
+                      />
+                    </div>
+                    <Button size="sm" disabled={busy !== null || totpCode.length !== 6} onClick={onConfirmTotp}>
+                      {busy === "totp-confirm" ? t("确认中…") : t("确认 TOTP")}
+                    </Button>
+                  </>
+                )}
+              </CardContent>
             </Card>
 
             <Card>
@@ -321,18 +322,20 @@ export default function SecurityPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <ConfirmAction
-                  trigger={
-                    <Button variant="outline" size="sm" disabled={busy !== null}>
-                      {busy === "recovery" ? t("生成中…") : t("生成新恢复码")}
-                    </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void guarded(
+                      "recovery",
+                      () => generateRecoveryCodes(),
+                      (grantId) => generateRecoveryCodes(grantId),
+                    )
                   }
-                  title={t("生成新恢复码？")}
-                  description={t("重新生成将使现有未使用的恢复码全部失效，且新码只在离开本页前显示一次。")}
-                  confirmLabel={t("生成新恢复码")}
-                  successMessage={t("新恢复码已生成，请立即保存。")}
-                  onConfirm={generateRecoveryCodes}
-                />
+                >
+                  {busy === "recovery" ? t("生成中…") : t("生成新恢复码")}
+                </Button>
                 {recoveryCodes && (
                   <div className="rounded-md border p-3">
                     <p className="mb-2 text-sm text-destructive">{t("请立即保存，离开本页后不再显示：")}</p>
@@ -348,8 +351,10 @@ export default function SecurityPage() {
 
             <Card>
               <CardHeader>
-              <CardTitle className="text-sm">{t("已注册的验证因子")}</CardTitle>
-              <CardDescription>{t("撤销最后一个可用因子会被服务端拒绝。")}</CardDescription>
+                <CardTitle className="text-sm">{t("已注册的验证因子")}</CardTitle>
+                <CardDescription>
+                  {t("撤销 TOTP 需验证当前验证码与登录密码；最后一个 TOTP 不可撤销（请使用「更换 TOTP」）。")}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {factors.length === 0 ? (
@@ -365,18 +370,39 @@ export default function SecurityPage() {
                             {factor.lastUsedAt && ` · ${t("最近使用 {date}", { date: new Date(factor.lastUsedAt).toLocaleString() })}`}
                           </p>
                         </div>
-                        <ConfirmAction
-                          trigger={
-                            <Button variant="destructive" size="sm">
-                              {t("撤销")}
-                            </Button>
-                          }
-                          title={t("撤销「{name}」？", { name: describeFactor(factor) })}
-                          description={t("撤销后无法恢复；如这是最后一个可用因子，两步验证将被关闭。")}
-                          confirmLabel={t("撤销")}
-                          successMessage={t("因子已撤销。")}
-                          onConfirm={() => revokeFactor(factor)}
-                        />
+                        {factor.type === "passkey" ? (
+                          <ConfirmAction
+                            trigger={
+                              <Button variant="destructive" size="sm">
+                                {t("撤销")}
+                              </Button>
+                            }
+                            title={t("撤销「{name}」？", { name: describeFactor(factor) })}
+                            description={t("退役 Passkey 已不可用于验证；撤销仅清除存量记录。")}
+                            confirmLabel={t("撤销")}
+                            successMessage={t("因子已撤销。")}
+                            onConfirm={async () => {
+                              await mfaApi.revokeFactor(factor.id)
+                            }}
+                          />
+                        ) : totpCount > 1 ? (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={busy !== null}
+                            onClick={() =>
+                              void guarded(
+                                `revoke-${factor.id}`,
+                                () => mfaApi.revokeFactor(factor.id).then(() => undefined),
+                                (grantId) => mfaApi.revokeFactor(factor.id, grantId).then(() => t("因子已撤销。")),
+                              )
+                            }
+                          >
+                            {busy === `revoke-${factor.id}` ? t("撤销中…") : t("撤销")}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{t("更换请使用「更换 TOTP」")}</span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -384,6 +410,57 @@ export default function SecurityPage() {
               </CardContent>
             </Card>
           </div>
+
+          <Dialog open={pendingGrant !== null} onOpenChange={(open) => !open && setPendingGrant(null)}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{grantDialogTitle()}</DialogTitle>
+                <DialogDescription>
+                  {pendingGrant?.passwordRequired
+                    ? t("该操作需要验证当前认证器验证码与登录密码，授权仅本次有效。")
+                    : t("该操作需要验证当前认证器验证码，授权仅本次有效。")}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="grant-totp-code">{t("输入认证器 6 位验证码")}</Label>
+                  <Input
+                    id="grant-totp-code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={grantCode}
+                    onChange={(event) => setGrantCode(event.target.value)}
+                  />
+                </div>
+                {pendingGrant?.passwordRequired && (
+                  <div className="space-y-1">
+                    <Label htmlFor="grant-password">{t("当前密码")}</Label>
+                    <Input
+                      id="grant-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={grantPassword}
+                      onChange={(event) => setGrantPassword(event.target.value)}
+                    />
+                  </div>
+                )}
+                {grantError && <p role="alert" className="text-sm text-destructive">{grantError}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" size="sm" onClick={() => setPendingGrant(null)}>
+                  {t("取消")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={grantCode.length !== 6 || (pendingGrant?.passwordRequired === true && grantPassword.length === 0)}
+                  onClick={() => void submitGrant()}
+                >
+                  {t("验证并继续")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>

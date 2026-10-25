@@ -8,18 +8,35 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 }
 
-/** 按前缀路由 mock fetch（长前缀放前面，避免 /factors 抢走 /factors/revoke）。 */
+type RecordedCall = { url: string; body: unknown; grantHeader?: string }
+
+/** 按前缀路由 mock fetch（长前缀放前面），并记录写请求的授权头供断言。 */
 function routeFetch(routes: Array<[string, () => Response]>) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const calls: RecordedCall[] = []
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     const handler = routes.find(([prefix]) => url.startsWith(prefix))
     if (!handler) throw new Error(`unexpected fetch: ${url}`)
+    if (init?.method === "POST") {
+      const headers = init.headers as Record<string, string> | undefined
+      calls.push({
+        url,
+        body: init.body ? JSON.parse(String(init.body)) : null,
+        grantHeader: headers?.["X-Panda-Mfa-Grant"],
+      })
+    }
     return handler[1]()
   })
   vi.stubGlobal("fetch", fetchMock)
+  return calls
 }
 
-const loadedState = () => [
+const antiforgery: [string, () => Response] = [
+  "/account/mfa/user/antiforgery",
+  () => jsonResponse({ token: "test-token" }),
+]
+
+const totpUserState = (): Array<[string, () => Response]> => [
   [
     "/account/mfa/user/status",
     () =>
@@ -27,6 +44,26 @@ const loadedState = () => [
         hasActiveFactor: true,
         requiresReconfiguration: false,
         recoveryCodeCount: 10,
+        activePasskeyCount: 0,
+      }),
+  ],
+  [
+    "/account/mfa/user/factors",
+    () =>
+      jsonResponse([
+        { id: "f2", type: "totp", friendlyName: null, createdAt: "2026-09-23T08:00:00+00:00", lastUsedAt: null },
+      ]),
+  ],
+]
+
+const retiredPasskeyState = (): Array<[string, () => Response]> => [
+  [
+    "/account/mfa/user/status",
+    () =>
+      jsonResponse({
+        hasActiveFactor: false,
+        requiresReconfiguration: false,
+        recoveryCodeCount: 0,
         activePasskeyCount: 1,
       }),
   ],
@@ -34,16 +71,10 @@ const loadedState = () => [
     "/account/mfa/user/factors",
     () =>
       jsonResponse([
-        {
-          id: "f1",
-          type: "passkey",
-          friendlyName: "Windows Hello",
-          createdAt: "2026-09-23T08:00:00+00:00",
-          lastUsedAt: null,
-        },
+        { id: "f1", type: "passkey", friendlyName: "Windows Hello", createdAt: "2026-09-23T08:00:00+00:00", lastUsedAt: null },
       ]),
   ],
-] as Array<[string, () => Response]>
+]
 
 afterEach(() => {
   cleanup()
@@ -52,23 +83,15 @@ afterEach(() => {
 })
 
 describe("SecurityPage", () => {
-  it("renders mfa status and registered factors", async () => {
-    routeFetch(loadedState())
+  it("labels retired passkey rows as retired and offers no passkey enrollment", async () => {
+    routeFetch(retiredPasskeyState())
 
     render(<Providers><SecurityPage /></Providers>)
 
-    expect(await screen.findByText(/已启用/)).toBeInTheDocument()
-    expect(screen.getByText("Windows Hello")).toBeInTheDocument()
+    expect(await screen.findByText(/已退役 Passkey/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "撤销" })).toBeInTheDocument()
-  })
-
-  it("marks passkey as unsupported and keeps enrollment disabled without WebAuthn", async () => {
-    routeFetch(loadedState())
-
-    render(<Providers><SecurityPage /></Providers>)
-
-    expect(await screen.findByText(/此浏览器不支持 Passkey/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "添加 Passkey" })).toBeDisabled()
+    // Passkey 已退役：页面不出现任何添加/注册 Passkey 入口。
+    expect(screen.queryByRole("button", { name: /Passkey/ })).not.toBeInTheDocument()
   })
 
   it("sends the user back to login when the IDP answers with an HTML login redirect", async () => {
@@ -82,67 +105,113 @@ describe("SecurityPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/登录状态已失效/)
   })
 
-  it("surfaces the server error via the confirm dialog when revoking the last active factor fails", async () => {
-    routeFetch([
-      ["/account/mfa/user/antiforgery", () => jsonResponse({ token: "test-token" })],
-      ["/account/mfa/user/factors/revoke", () => jsonResponse({ error: "Cannot remove the last active factor." }, 400)],
-      ...loadedState(),
+  it("revokes a retired passkey row without an operation grant (migration action)", async () => {
+    const calls = routeFetch([
+      antiforgery,
+      ["/account/mfa/user/factors/revoke", () => jsonResponse({ status: "ok" })],
+      ...retiredPasskeyState(),
     ])
     const user = userEvent.setup()
 
     render(<Providers><SecurityPage /></Providers>)
-    await screen.findByText("Windows Hello")
+    await screen.findByText(/已退役 Passkey/)
 
-    // ConfirmAction:先确认(不直接发请求),失败经全局 notify 驻留展示、对话框保持可重试。
     await user.click(screen.getByRole("button", { name: "撤销" }))
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
-    expect(vi.mocked(fetch).mock.calls.some(([u]) => String(u).includes("/factors/revoke"))).toBe(false)
-
     await user.click(screen.getByTestId("confirm-action-confirm"))
-    expect(await screen.findAllByText(/Cannot remove the last active factor/)).toBeTruthy()
-    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+
+    await screen.findByText(/因子已撤销/)
+    const revokeCall = calls.find((call) => call.url.includes("/factors/revoke"))
+    expect(revokeCall).toBeTruthy()
+    expect(revokeCall?.grantHeader).toBeUndefined()
   })
 
-  // 2026-09-30 缺口收口：仅有 TOTP 因子的用户此前无法完成 step-up（旧 UI 只提供 Passkey 断言且按钮
-  // 在浏览器支持时一律显示，TOTP-only 用户点击必然得到服务端错误）。
-  it("lets a totp-only user step up with an authenticator code and hides the passkey step-up entry", async () => {
-    routeFetch([
-      ["/account/mfa/user/antiforgery", () => jsonResponse({ token: "test-token" })],
-      ["/account/mfa/user/totp/assert", () => jsonResponse({ status: "ok" })],
-      [
-        "/account/mfa/user/status",
-        () =>
-          jsonResponse({
-            hasActiveFactor: true,
-            requiresReconfiguration: false,
-            recoveryCodeCount: 10,
-            activePasskeyCount: 0,
-          }),
-      ],
-      [
-        "/account/mfa/user/factors",
-        () =>
-          jsonResponse([
-            {
-              id: "f2",
-              type: "totp",
-              friendlyName: null,
-              createdAt: "2026-09-23T08:00:00+00:00",
-              lastUsedAt: null,
-            },
-          ]),
-      ],
-    ])
+  it("shows the replace hint instead of a revoke button for the only TOTP factor", async () => {
+    routeFetch(totpUserState())
 
     render(<Providers><SecurityPage /></Providers>)
-    await screen.findByText("TOTP 验证器")
 
-    // 没有 Passkey 因子：不显示 Passkey step-up 入口（有因子才提供对应断言路径）。
-    expect(screen.queryByRole("button", { name: "先验证已有因子" })).not.toBeInTheDocument()
+    await screen.findAllByText("TOTP 验证器")
+    expect(screen.getByText(/更换请使用/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "撤销" })).not.toBeInTheDocument()
+  })
 
-    await userEvent.type(screen.getByLabelText("输入认证器 6 位验证码"), "123456")
-    await userEvent.click(screen.getByRole("button", { name: "验证 TOTP" }))
+  // 操作授权流（AUTH-DELIVERY-002）：裸试 403 mfaGrantRequired → 授权对话框（TOTP+密码）
+  // → POST grants → 带 X-Panda-Mfa-Grant 头重放原操作。
+  it("runs the grant flow for replacing TOTP: 403 marker → dialog → grant header retry", async () => {
+    let grantRequiredOnce = true
+    const calls = routeFetch([
+      antiforgery,
+      [
+        "/account/mfa/user/totp/options",
+        () =>
+          grantRequiredOnce
+            ? jsonResponse(
+                {
+                  mfaGrantRequired: true,
+                  operation: "self.totp-enroll",
+                  targetId: "user-1",
+                  parameters: {},
+                  passwordRequired: true,
+                },
+                403,
+              )
+            : jsonResponse({ factorId: "f3", secret: "ABC", provisioningUri: "otpauth://totp/x" }),
+      ],
+      [
+        "/account/mfa/user/grants",
+        () => jsonResponse({ grantId: "11111111-1111-1111-1111-111111111111", expiresAt: "2026-10-25T12:00:00Z" }),
+      ],
+      ...totpUserState(),
+    ])
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/验证通过/)
+    const user = userEvent.setup()
+    render(<Providers><SecurityPage /></Providers>)
+    await screen.findAllByText("TOTP 验证器")
+
+    // 裸试：服务端 403 授权标记 → 弹出授权对话框（需验证码+密码）。
+    await user.click(screen.getByRole("button", { name: "更换 TOTP" }))
+    expect(await screen.findByRole("dialog")).toHaveTextContent(/更换 TOTP/)
+    expect(screen.getByLabelText(/当前密码/)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText(/输入认证器 6 位验证码/), "123456")
+    await user.type(screen.getByLabelText(/当前密码/), "Strong!Pass123")
+    grantRequiredOnce = false
+    await user.click(screen.getByRole("button", { name: "验证并继续" }))
+
+    // 签发授权 → 重放 totp/options 带授权头，页面进入新验证器确认态。
+    expect(await screen.findByText(/或手动添加密钥/)).toBeInTheDocument()
+
+    const grantCall = calls.find((call) => call.url.includes("/grants"))
+    expect(grantCall?.body).toMatchObject({ operation: "self.totp-enroll", targetId: "user-1", totpCode: "123456" })
+    const retryCall = calls.filter((call) => call.url.includes("/totp/options")).at(-1)
+    expect(retryCall?.grantHeader).toBe("11111111-1111-1111-1111-111111111111")
+  })
+
+  it("surfaces grant issuance failures inside the dialog without losing it", async () => {
+    routeFetch([
+      antiforgery,
+      [
+        "/account/mfa/user/totp/options",
+        () =>
+          jsonResponse(
+            { mfaGrantRequired: true, operation: "self.totp-enroll", targetId: "user-1", parameters: {}, passwordRequired: true },
+            403,
+          ),
+      ],
+      ["/account/mfa/user/grants", () => jsonResponse({ error: "当前密码不正确。" }, 400)],
+      ...totpUserState(),
+    ])
+
+    const user = userEvent.setup()
+    render(<Providers><SecurityPage /></Providers>)
+    await screen.findAllByText("TOTP 验证器")
+
+    await user.click(screen.getByRole("button", { name: "更换 TOTP" }))
+    await user.type(screen.getByLabelText(/输入认证器 6 位验证码/), "123456")
+    await user.type(screen.getByLabelText(/当前密码/), "wrong")
+    await user.click(screen.getByRole("button", { name: "验证并继续" }))
+
+    expect(await screen.findByText(/当前密码不正确/)).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 })
