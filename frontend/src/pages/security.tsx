@@ -19,19 +19,16 @@ import { GrantRequiredError, mfaApi, type MfaFactor, type MfaStatus } from "@/li
 import { useI18n } from "@/lib/i18n"
 
 /**
- * 安全设置：普通用户自助管理 MFA（TOTP / 恢复码）。Passkey 已退役（AUTH-DELIVERY-002）：
- * 存量 passkey 行仅展示与撤销（迁移动作，无需授权）；特敏感操作（更换 TOTP / 撤销 TOTP /
- * 重生成恢复码）须先完成单次操作授权——TOTP 码 + 当前密码。授权对话框由服务端
+ * 安全设置：普通用户自助管理 MFA（TOTP / 恢复码）。Passkey 已退役且表已删除
+ * （AUTH-DELIVERY-002 删表批）；更换 TOTP / 重生成恢复码须先完成单次操作授权——
+ * TOTP 码 + 当前密码。授权对话框由服务端
  * 403 mfaGrantRequired 信号驱动，签发参数回显自服务端响应，两端口径不漂移。
  */
 export default function SecurityPage() {
   const { t } = useI18n()
 
   function describeFactor(factor: MfaFactor): string {
-    if (factor.type === "totp") return t("TOTP 验证器")
-    return factor.friendlyName
-      ? t("已退役 Passkey：{name}", { name: factor.friendlyName })
-      : t("已退役 Passkey")
+    return t("TOTP 验证器")
   }
 
   const [status, setStatus] = useState<MfaStatus | null>(null)
@@ -205,8 +202,8 @@ export default function SecurityPage() {
     await load()
   }
 
-  const hasTotp = factors.some((factor) => factor.type === "totp")
-  const totpCount = factors.filter((factor) => factor.type === "totp").length
+  // 删表批后因子只剩 TOTP；轮换机制下唯一 TOTP 是稳态（服务端护栏兜底）。
+  const hasTotp = factors.length > 0
 
   function grantDialogTitle(): string {
     if (!pendingGrant) return ""
@@ -249,7 +246,7 @@ export default function SecurityPage() {
               <CardDescription>
                 {status?.hasActiveFactor
                   ? t("已启用：{totpCount} 个 TOTP、{recoveryCodeCount} 个未用恢复码", {
-                      totpCount,
+                      totpCount: factors.filter((factor) => factor.type === 'totp').length,
                       recoveryCodeCount: status.recoveryCodeCount,
                     })
                   : t("尚未启用。启用后可在敏感操作前要求第二重验证。")}
@@ -370,39 +367,7 @@ export default function SecurityPage() {
                             {factor.lastUsedAt && ` · ${t("最近使用 {date}", { date: new Date(factor.lastUsedAt).toLocaleString() })}`}
                           </p>
                         </div>
-                        {factor.type === "passkey" ? (
-                          <ConfirmAction
-                            trigger={
-                              <Button variant="destructive" size="sm">
-                                {t("撤销")}
-                              </Button>
-                            }
-                            title={t("撤销「{name}」？", { name: describeFactor(factor) })}
-                            description={t("退役 Passkey 已不可用于验证；撤销仅清除存量记录。")}
-                            confirmLabel={t("撤销")}
-                            successMessage={t("因子已撤销。")}
-                            onConfirm={async () => {
-                              await mfaApi.revokeFactor(factor.id)
-                            }}
-                          />
-                        ) : totpCount > 1 ? (
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            disabled={busy !== null}
-                            onClick={() =>
-                              void guarded(
-                                `revoke-${factor.id}`,
-                                () => mfaApi.revokeFactor(factor.id).then(() => undefined),
-                                (grantId) => mfaApi.revokeFactor(factor.id, grantId).then(() => t("因子已撤销。")),
-                              )
-                            }
-                          >
-                            {busy === `revoke-${factor.id}` ? t("撤销中…") : t("撤销")}
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">{t("更换请使用「更换 TOTP」")}</span>
-                        )}
+                        <span className="text-xs text-muted-foreground">{t("更换请使用「更换 TOTP」")}</span>
                       </li>
                     ))}
                   </ul>
