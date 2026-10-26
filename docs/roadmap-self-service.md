@@ -4,7 +4,7 @@
 
 ## 现状盘点（2026-10-16）
 
-已有：个人资料查看（name/nickname/email/roles 只读）+ 返回应用外链（AppHome*）；安全页 Passkey / TOTP / 恢复码 / 已注册因子 / 登出。
+已有：个人资料查看（name/nickname/email/roles 只读）+ 返回应用外链（AppHome*）；安全页 TOTP / 恢复码 / 已注册因子 / 登出（Passkey 已于 AUTH-DELIVERY-002 退役，存量行标记可撤销；特敏感操作走单次授权）。
 服务端已备而前端未暴露的表：`panda_external_identities`、`login_logs`、`panda_security_events`、`panda_email_verifications`。
 
 ## 差距清单（按价值排序）

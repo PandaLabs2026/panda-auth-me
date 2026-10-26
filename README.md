@@ -14,7 +14,7 @@ The frontend is based on [panda-webapp-template](https://github.com/PandaLabs202
 
 ## Current implementation and limitations
 
-The [backend](src/PandaAuth.Me/Program.cs) contains OIDC challenge/callback, local Cookie, session, antiforgery logout and health entry points. The [frontend](frontend/src/pages/profile.tsx) includes an identity overview, and the [security settings page](frontend/src/pages/security.tsx) lets users self-manage Passkey/TOTP/recovery codes (same-origin calls to the IDP's `/account/mfa/user/*` with IDP antiforgery tokens; code complete, production release and end-to-end acceptance pending). Login history, devices, grants and password changes remain placeholders or plans.
+The [backend](src/PandaAuth.Me/Program.cs) contains OIDC challenge/callback, local Cookie, session, antiforgery logout and health entry points. The [frontend](frontend/src/pages/profile.tsx) includes an identity overview, and the [security settings page](frontend/src/pages/security.tsx) lets users self-manage TOTP and recovery codes (same-origin calls to the IDP's `/account/mfa/user/*` with IDP antiforgery tokens; Passkey was retired in AUTH-DELIVERY-002 — sensitive actions now require single-use TOTP+password operation grants). Login history, devices, grants and password changes remain placeholders or plans.
 
 Default redirect URIs in the local [Auth configuration](src/PandaAuth.Me/appsettings.json) now include the `/me` prefix required by the `/me/callback/login/{provider}` route (local: `http://localhost:9007/me/callback/login/pandaauth`); production values are injected via compose (`Auth__Seed__Me__RedirectUris__*` / `__PostLogoutRedirectUris__*`), and the Server-side Seeder **upserts** existing whitelists to match. The production login flow is verified up to “the IDP renders the login page”, and a scripted OIDC flow verified userinfo, refresh, revocation and logout on 2026-09-17 (the callback carries the `/me` prefix and PKCE `S256`; tampered callback and post-logout refresh-token replay have negative evidence). Real-browser and local-HTTPS acceptance remain outstanding. Cookies always require Secure; logout is not claimed to clear every client session globally.
 
@@ -43,7 +43,7 @@ npm run build
 
 Frontend output goes to BFF `wwwroot/me`. The backend entry point is `dotnet run --project src/PandaAuth.Me` from the repository root; current development binding is http://localhost:9007, health path `/me/healthz`. Run `npm run dev` in `frontend` for port 5172; the dev server proxies only the routes the BFF actually owns (`/me/api`, `/me/login`, `/me/callback`, `/me/healthz`) to 9007 and leaves the rest of `/me/*` (including `@vite/client` and source files) to Vite — proxying the whole `/me` prefix breaks HMR, the module graph and source debugging. Full local run instructions await callback/TLS/Issuer validation.
 
-Self-service profile and MFA factor management (TOTP, Passkeys, recovery codes) are implemented; administrator and cross-client safety boundaries are enforced on the Server side.
+Self-service profile and MFA factor management (TOTP and recovery codes; Passkeys retired 2026-10, legacy rows revocable) are implemented; administrator and cross-client safety boundaries are enforced on the Server side.
 
 ## Roadmap and governance
 

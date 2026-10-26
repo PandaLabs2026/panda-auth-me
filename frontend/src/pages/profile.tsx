@@ -54,7 +54,7 @@ export default function ProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">{t("安全设置")}</CardTitle>
-            <CardDescription>{t("Passkey / TOTP / 恢复码管理")}</CardDescription>
+            <CardDescription>{t("TOTP 与恢复码管理")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline" size="sm">

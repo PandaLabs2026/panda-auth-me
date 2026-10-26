@@ -25,6 +25,18 @@ export type MfaFactor = {
   lastUsedAt: string | null
 }
 
+/** 服务端 403 mfaGrantRequired 的结构化信号：携带授权签发所需的全部参数回显。 */
+export class GrantRequiredError extends Error {
+  constructor(
+    readonly operation: string,
+    readonly targetId: string,
+    readonly parameters: Record<string, string | null> | null,
+    readonly passwordRequired: boolean,
+  ) {
+    super("mfa_grant_required")
+  }
+}
+
 async function errorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: unknown }
@@ -53,12 +65,45 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
           : "登录状态已失效，正在重新登录…",
       )
     }
-    if (!response.ok) throw new Error(await errorMessage(response))
+    if (!response.ok) {
+      let parsed: unknown = null
+      try {
+        parsed = await response.json()
+      } catch {
+        // 非 JSON 失败体，走通用文案
+      }
+      const body = parsed as {
+        mfaGrantRequired?: boolean
+        operation?: string
+        targetId?: string
+        parameters?: Record<string, string | null> | null
+        passwordRequired?: boolean
+        error?: unknown
+      } | null
+      if (body?.mfaGrantRequired && body.operation) {
+        throw new GrantRequiredError(
+          body.operation,
+          body.targetId ?? "",
+          body.parameters ?? null,
+          body.passwordRequired === true,
+        )
+      }
+      // body 已被消费，不能再读一次：错误串优先取 body.error，否则按状态码给兜底文案。
+      if (body && typeof body.error === "string") throw new Error(body.error)
+      const en = currentLocale() === "en"
+      if (response.status === 403)
+        throw new Error(
+          en
+            ? "Preconditions not met: a confirmed email and a recent verification are required."
+            : "当前条件不满足：需要已确认的邮箱，且刚刚完成过验证。",
+        )
+      throw new Error(en ? `Request failed (HTTP ${response.status})` : `请求失败（HTTP ${response.status}）`)
+    }
     return (await response.json()) as T
   })
 }
 
-async function post<T>(path: string, body?: unknown): Promise<T> {
+async function post<T>(path: string, body?: unknown, grantId?: string): Promise<T> {
   const { token } = await fetchJson<{ token: string }>(`${MFA_BASE}/antiforgery`)
   return fetchJson<T>(`${MFA_BASE}/${path}`, {
     method: "POST",
@@ -66,6 +111,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
       "Content-Type": "application/json",
       RequestVerificationToken: token,
       "X-Requested-With": "XMLHttpRequest",
+      ...(grantId ? { "X-Panda-Mfa-Grant": grantId } : {}),
     },
     body: JSON.stringify(body ?? {}),
   })
@@ -75,21 +121,16 @@ export const mfaApi = {
   status: () => fetchJson<MfaStatus>(`${MFA_BASE}/status`),
   factors: () => fetchJson<MfaFactor[]>(`${MFA_BASE}/factors`),
 
-  passkeyEnrollmentOptions: () =>
-    post<{ ceremonyId: string; publicKey: Record<string, unknown> }>("passkey/enrollment/options"),
-  passkeyEnrollmentComplete: (ceremonyId: string, response: unknown) =>
-    post<{ status: string; activePasskeyCount: number }>("passkey/enrollment/complete", { ceremonyId, response }),
-  passkeyAssertionOptions: () =>
-    post<{ ceremonyId: string; publicKey: Record<string, unknown> }>("passkey/assertion/options"),
-  passkeyAssertionComplete: (ceremonyId: string, response: unknown) =>
-    post<{ status: string }>("passkey/assertion/complete", { ceremonyId, response }),
+  // 操作授权（AUTH-DELIVERY-002，Passkey 退役后特敏感自助操作的单次授权）：
+  // TOTP 码 + 操作者本人密码 → { grantId }，5 分钟内单次消费，重试原请求时带
+  // X-Panda-Mfa-Grant 头。
+  requestGrant: (operation: string, targetId: string, parameters: Record<string, string | null> | null, totpCode: string, currentPassword?: string) =>
+    post<{ grantId: string; expiresAt: string }>("grants", { operation, targetId, parameters, totpCode, currentPassword }),
 
-  totpOptions: () =>
-    post<{ factorId: string; secret: string; provisioningUri: string }>("totp/options"),
+  totpOptions: (grantId?: string) =>
+    post<{ factorId: string; secret: string; provisioningUri: string }>("totp/options", undefined, grantId),
   totpConfirm: (factorId: string, code: string) => post<{ status: string }>("totp/confirm", { factorId, code }),
-  // step-up 断言（打开 5 分钟敏感操作窗口）：仅有 TOTP 因子的用户此前无法完成 step-up（2026-09-30 缺口收口）。
-  totpAssert: (code: string) => post<{ status: string }>("totp/assert", { code }),
 
-  recoveryCodes: () => post<string[]>("recovery-codes"),
-  revokeFactor: (factorId: string) => post<{ status: string }>("factors/revoke", { factorId }),
+  recoveryCodes: (grantId?: string) => post<string[]>("recovery-codes", undefined, grantId),
+  revokeFactor: (factorId: string, grantId?: string) => post<{ status: string }>("factors/revoke", { factorId }, grantId),
 }
