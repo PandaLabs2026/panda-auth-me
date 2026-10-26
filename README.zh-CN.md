@@ -14,7 +14,7 @@ PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 �
 
 ## 当前实现与限制
 
-[后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览，[安全设置页](frontend/src/pages/security.tsx)可自助管理 Passkey/TOTP/恢复码（直连同源调用 IDP 的 `/account/mfa/user/*`，写操作经 IDP antiforgery 令牌；代码已具备，生产发布与端到端验收待补）。登录记录、设备、授权管理和改密仍为占位或规划。
+[后端](src/PandaAuth.Me/Program.cs)包含 OIDC challenge/回调、本地 Cookie、session、防伪退出及健康入口；[前端](frontend/src/pages/profile.tsx)有身份概览，[安全设置页](frontend/src/pages/security.tsx)可自助管理 TOTP/恢复码（直连同源调用 IDP 的 `/account/mfa/user/*`，写操作经 IDP antiforgery 令牌；Passkey 已随 AUTH-DELIVERY-002 退役——特敏感操作须单次 TOTP+密码操作授权，存量 Passkey 行可撤销）。登录记录、设备、授权管理和改密仍为占位或规划。
 
 本地 [Auth 配置](src/PandaAuth.Me/appsettings.json)的默认回调已带 `/me/callback/login/{provider}` 所需的 `/me` 前缀（本地 `http://localhost:9007/me/callback/login/pandaauth`）；生产回调由 compose 注入（`Auth__Seed__Me__RedirectUris__*` / `__PostLogoutRedirectUris__*`），并由 Server 端 Seeder **upsert** 订正存量白名单。生产登录链路已验证到「IDP 渲染登录页」，并于 2026-09-17 通过脚本化 OIDC 全流程验证 userinfo、刷新、吊销和登出（回调带 `/me` 前缀、PKCE `S256`；篡改回调和登出后 refresh token 重放均有反向对照）。真实浏览器和本地 HTTPS 验收仍待补。Cookie 始终要求 Secure；不宣称全局所有客户端已经同步登出。
 
@@ -43,7 +43,7 @@ npm run build
 
 前端输出到 BFF `wwwroot/me`。后端入口是在本仓根目录执行 `dotnet run --project src/PandaAuth.Me`；当前开发监听 http://localhost:9007，健康路径 `/me/healthz`。前端在 `frontend` 执行 `npm run dev`，端口 5172；dev server 只把 BFF 实际拥有的路由（`/me/api`、`/me/login`、`/me/callback`、`/me/healthz`）代理到 9007，其余 `/me/*`（含 `@vite/client` 与源码）仍由 Vite 服务——代理整个 `/me` 前缀会把 HMR、模块图与源码调试一并打坏。完整本地运行步骤待回调/TLS/Issuer 配置验证后提供。
 
-个人资料与 MFA 因子自助管理（TOTP、Passkey、恢复码）已实现；管理员和跨客户端安全边界由 Server 侧强制执行。
+个人资料与 MFA 因子自助管理（TOTP、恢复码；Passkey 已于 2026-10 退役，存量行可撤销）已实现；管理员和跨客户端安全边界由 Server 侧强制执行。
 
 ## Roadmap 与治理
 
