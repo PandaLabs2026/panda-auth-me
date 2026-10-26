@@ -14,12 +14,11 @@ export type MfaStatus = {
   hasActiveFactor: boolean
   requiresReconfiguration: boolean
   recoveryCodeCount: number
-  activePasskeyCount: number
 }
 
 export type MfaFactor = {
   id: string
-  type: "totp" | "passkey"
+  type: "totp"
   friendlyName: string | null
   createdAt: string
   lastUsedAt: string | null

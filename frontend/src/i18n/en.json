@@ -61,15 +61,12 @@
   "已配置 TOTP 验证器。更换需验证当前验证码与登录密码；旧验证器在新验证器确认前保持可用。": "A TOTP authenticator is configured. Replacing it requires a verification code and your password; the old authenticator stays usable until the new one is confirmed.",
   "更换 TOTP": "Replace TOTP",
   "TOTP 已启用。": "TOTP is now enabled.",
-  "已退役 Passkey": "Retired Passkey",
-  "已退役 Passkey：{name}": "Retired Passkey: {name}",
-  "退役 Passkey 已不可用于验证；撤销仅清除存量记录。": "Retired Passkeys can no longer be used for verification; revoking only removes the stored record.",
-  "撤销 TOTP 需验证当前验证码与登录密码；最后一个 TOTP 不可撤销（请使用「更换 TOTP」）。": "Revoking a TOTP requires a verification code and your password. The last TOTP cannot be revoked (use \"Replace TOTP\" instead).",
   "更换请使用「更换 TOTP」": "Use \"Replace TOTP\" to replace it",
   "撤销中…": "Revoking...",
   "当前密码": "Current password",
   "该操作需要验证当前认证器验证码与登录密码，授权仅本次有效。": "This action requires a verification code from your authenticator and your current password. The authorization is valid for this action only.",
   "该操作需要验证当前认证器验证码，授权仅本次有效。": "This action requires a verification code from your authenticator. The authorization is valid for this action only.",
   "验证并继续": "Verify and continue",
-  "取消": "Cancel"
+  "取消": "Cancel",
+  "撤销最后一个可用因子会被服务端拒绝。": "Revoking the last available factor is rejected by the server."
 }

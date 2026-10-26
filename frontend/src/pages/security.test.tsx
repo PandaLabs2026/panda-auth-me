@@ -39,39 +39,13 @@ const antiforgery: [string, () => Response] = [
 const totpUserState = (): Array<[string, () => Response]> => [
   [
     "/account/mfa/user/status",
-    () =>
-      jsonResponse({
-        hasActiveFactor: true,
-        requiresReconfiguration: false,
-        recoveryCodeCount: 10,
-        activePasskeyCount: 0,
-      }),
+    () => jsonResponse({ hasActiveFactor: true, requiresReconfiguration: false, recoveryCodeCount: 10 }),
   ],
   [
     "/account/mfa/user/factors",
     () =>
       jsonResponse([
         { id: "f2", type: "totp", friendlyName: null, createdAt: "2026-09-23T08:00:00+00:00", lastUsedAt: null },
-      ]),
-  ],
-]
-
-const retiredPasskeyState = (): Array<[string, () => Response]> => [
-  [
-    "/account/mfa/user/status",
-    () =>
-      jsonResponse({
-        hasActiveFactor: false,
-        requiresReconfiguration: false,
-        recoveryCodeCount: 0,
-        activePasskeyCount: 1,
-      }),
-  ],
-  [
-    "/account/mfa/user/factors",
-    () =>
-      jsonResponse([
-        { id: "f1", type: "passkey", friendlyName: "Windows Hello", createdAt: "2026-09-23T08:00:00+00:00", lastUsedAt: null },
       ]),
   ],
 ]
@@ -83,17 +57,6 @@ afterEach(() => {
 })
 
 describe("SecurityPage", () => {
-  it("labels retired passkey rows as retired and offers no passkey enrollment", async () => {
-    routeFetch(retiredPasskeyState())
-
-    render(<Providers><SecurityPage /></Providers>)
-
-    expect(await screen.findByText(/已退役 Passkey/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "撤销" })).toBeInTheDocument()
-    // Passkey 已退役：页面不出现任何添加/注册 Passkey 入口。
-    expect(screen.queryByRole("button", { name: /Passkey/ })).not.toBeInTheDocument()
-  })
-
   it("sends the user back to login when the IDP answers with an HTML login redirect", async () => {
     routeFetch([
       ["/account/mfa/user/status", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
@@ -105,32 +68,13 @@ describe("SecurityPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/登录状态已失效/)
   })
 
-  it("revokes a retired passkey row without an operation grant (migration action)", async () => {
-    const calls = routeFetch([
-      antiforgery,
-      ["/account/mfa/user/factors/revoke", () => jsonResponse({ status: "ok" })],
-      ...retiredPasskeyState(),
-    ])
-    const user = userEvent.setup()
-
-    render(<Providers><SecurityPage /></Providers>)
-    await screen.findByText(/已退役 Passkey/)
-
-    await user.click(screen.getByRole("button", { name: "撤销" }))
-    await user.click(screen.getByTestId("confirm-action-confirm"))
-
-    await screen.findByText(/因子已撤销/)
-    const revokeCall = calls.find((call) => call.url.includes("/factors/revoke"))
-    expect(revokeCall).toBeTruthy()
-    expect(revokeCall?.grantHeader).toBeUndefined()
-  })
-
-  it("shows the replace hint instead of a revoke button for the only TOTP factor", async () => {
+  it("renders the single TOTP factor with a replace hint and no revoke button", async () => {
     routeFetch(totpUserState())
 
     render(<Providers><SecurityPage /></Providers>)
 
     await screen.findAllByText("TOTP 验证器")
+    // 轮换机制下唯一 TOTP 是稳态：撤销不可用，引导「更换 TOTP」。
     expect(screen.getByText(/更换请使用/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "撤销" })).not.toBeInTheDocument()
   })
