@@ -36,21 +36,6 @@ export class GrantRequiredError extends Error {
   }
 }
 
-async function errorMessage(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { error?: unknown }
-    if (body && typeof body.error === "string") return body.error
-  } catch {
-    // 非 JSON 响应体，落到通用文案
-  }
-  const en = currentLocale() === "en"
-  if (response.status === 403)
-    return en
-      ? "Preconditions not met: a confirmed email and a recent verification are required."
-      : "当前条件不满足：需要已确认的邮箱，且刚刚完成过验证。"
-  return en ? `Request failed (HTTP ${response.status})` : `请求失败（HTTP ${response.status}）`
-}
-
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return fetchWithTimeout(path, init ?? {}, async (response) => {
     // IDP 的 [Authorize] 对未登录请求回 302 到登录页（fetch 会跟随并拿到 200 HTML），

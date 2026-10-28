@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import QRCode from "qrcode"
 
-import ConfirmAction from "@/components/patterns/ConfirmAction"
 import PageHeader from "@/components/patterns/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -26,10 +25,6 @@ import { useI18n } from "@/lib/i18n"
  */
 export default function SecurityPage() {
   const { t } = useI18n()
-
-  function describeFactor(factor: MfaFactor): string {
-    return t("TOTP 验证器")
-  }
 
   const [status, setStatus] = useState<MfaStatus | null>(null)
   const [factors, setFactors] = useState<MfaFactor[]>([])
@@ -361,7 +356,7 @@ export default function SecurityPage() {
                     {factors.map((factor) => (
                       <li key={factor.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                         <div>
-                          <p>{describeFactor(factor)}</p>
+                          <p>{t("TOTP 验证器")}</p>
                           <p className="text-xs text-muted-foreground">
                             {t("添加于 {date}", { date: new Date(factor.createdAt).toLocaleString() })}
                             {factor.lastUsedAt && ` · ${t("最近使用 {date}", { date: new Date(factor.lastUsedAt).toLocaleString() })}`}
