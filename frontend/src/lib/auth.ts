@@ -1,4 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { useAuthState } from "@/components/patterns/auth/context"
+import { meAuthLifecycle } from "@/lib/auth-lifecycle"
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout"
 
 /**
@@ -47,16 +49,13 @@ function isBffSession(value: unknown): value is BffSession {
     )
 }
 
-let onSessionExpired: ((returnTo: string) => void) | null = null
-
-/** 应用启动时注册会话过期跳转（模板组件层契约）。 */
-export function registerSessionExpiredHandler(handler: (returnTo: string) => void) {
-  onSessionExpired = handler
+/** A rejected resource triggers a merged session recheck, never direct navigation/replay. */
+export function handleUnauthorized() {
+  meAuthLifecycle.unauthorized(window.location.pathname + window.location.search)
 }
 
-/** 401 统一入口：模板 apiFetch 抛 401 前的钩子走这里。 */
-export function handleUnauthorized() {
-  onSessionExpired?.(window.location.pathname)
+export class AuthResponseError extends Error {
+  constructor(readonly status: number, message: string) {super(message)}
 }
 
 async function responseError(response: Response): Promise<Error> {
@@ -67,7 +66,7 @@ async function responseError(response: Response): Promise<Error> {
   } catch {
     // Keep the status fallback for empty or non-JSON failures.
   }
-  return new Error(message)
+  return new AuthResponseError(response.status, message)
 }
 
 export const sessionApi = {
@@ -96,7 +95,7 @@ export const sessionApi = {
     )
   },
 
-  /** 登出：防伪令牌成对 POST（注意 BFF 头是 X-XSRF-Token，IDP MFA 端点才是 RequestVerificationToken）。 */
+  /** Only fetch CSRF admission; a native form owns the full BFF/IdP logout navigation. */
   async logout(): Promise<void> {
     const token = await fetchWithTimeout(
       "/me/api/antiforgery",
@@ -107,33 +106,29 @@ export const sessionApi = {
       },
       10_000,
     )
-    await fetchWithTimeout(
-      "/me/api/logout",
-      {
-        method: "POST",
-        headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
-      },
-      async (response) => {
-        if (!response.ok) throw await responseError(response)
-      },
-      10_000,
-    )
-    window.location.assign("/me/login")
+    if (typeof token !== "string" || !token) throw new Error("退出请求缺少防伪凭据。")
+    const form = document.createElement("form")
+    form.method = "post"
+    form.action = "/me/api/logout"
+    form.hidden = true
+    const field = document.createElement("input")
+    field.type = "hidden"
+    field.name = "__RequestVerificationToken"
+    field.value = token
+    form.append(field)
+    document.body.append(form)
+    try { HTMLFormElement.prototype.submit.call(form) }
+    finally { form.remove() }
   },
 }
 
 /** 会话查询：无会话=null（守卫据此跳登录），Query 缓存单飞。 */
 export function useSession() {
-  return useQuery({ queryKey: ["session"], queryFn: ({ signal }) => sessionApi.me(signal), staleTime: 60_000, retry: false })
+  const auth = useAuthState()
+  return useQuery({ enabled: !auth.lifecycle, queryKey: ["session"], queryFn: ({ signal }) => sessionApi.me(signal), staleTime: 60_000, retry: false })
 }
 
 export function useLogout() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => sessionApi.logout(),
-    onSuccess: () => {
-      qc.setQueryData(["session"], null)
-      qc.clear()
-    },
-  })
+  const auth = useAuthState()
+  return useMutation({mutationFn: () => auth.lifecycle ? auth.logout() : sessionApi.logout()})
 }
