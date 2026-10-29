@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n"
 import { Fragment, useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
 import { useLocation } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
@@ -9,6 +10,7 @@ import { bindMfaSubject, meAuthLifecycle, meAuthNavigation } from "@/lib/auth-li
 
 /** One admission boundary outside the business shell; shared modules retain protected drafts. */
 export function SessionGate({children}: {children: ReactNode}) {
+  const { t } = useI18n()
   const client = useQueryClient(), location = useLocation()
   const adapter = useMemo<AuthAdapter<Session>>(() => ({
     session: signal => sessionApi.me(signal),
@@ -26,7 +28,7 @@ export function SessionGate({children}: {children: ReactNode}) {
       client.setQueryData(["session"], session ?? null)
     },
   }), [client])
-  return <AuthBoundary adapter={adapter} lifecycle={meAuthLifecycle} navigation={meAuthNavigation}
+  return <AuthBoundary translate={t} adapter={adapter} lifecycle={meAuthLifecycle} navigation={meAuthNavigation}
     target={"/me" + (location.pathname === "/" ? "/" : location.pathname) + location.search}
     revalidateOnResume brand={<img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain"/>}>
     <AccountContent>{children}</AccountContent>
