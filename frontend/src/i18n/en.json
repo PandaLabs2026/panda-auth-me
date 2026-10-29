@@ -48,7 +48,7 @@
   "因子已撤销。": "Factor revoked.",
   "账户中心登录": "Sign in to Account Center",
   "正在前往统一身份认证…": "Redirecting to the unified identity provider...",
-  "正在前往登录…": "Redirecting to sign-in...",
+  "正在前往登录…": "Continuing to sign in…",
   "请稍候。": "Please wait.",
   "返回应用": "Back to app",
   "页面加载中": "Loading page",
@@ -73,5 +73,9 @@
   "操作结果待核实。请先重新读取安全设置并核实结果，不要重复提交原操作。": "The operation result is uncertain. Reload the security settings and verify the outcome before submitting anything again.",
   "重新读取安全设置": "Reload security settings",
   "重新认证": "Sign in again",
-  "重新认证将离开当前页面。请先保留必要内容并核实待定操作结果；确认离开？": "Signing in again will leave this page. Keep any needed information and verify pending operation results first. Continue?"
+  "重新认证将离开当前页面。请先保留必要内容并核实待定操作结果；确认离开？": "Signing in again will leave this page. Keep any needed information and verify pending operation results first. Continue?",
+  "登录未完成": "Sign-in not completed",
+  "本次登录未完成，请明确选择后续操作。": "Sign-in was not completed. Choose how to continue.",
+  "正在前往统一身份认证，如未跳转请使用下方链接。": "Continuing to the identity service. If nothing happens, use the link below.",
+  "继续登录": "Continue to sign in"
 }
