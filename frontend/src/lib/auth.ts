@@ -1,4 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { useAuthState } from "@/components/patterns/auth/context"
+import { meAuthLifecycle } from "@/lib/auth-lifecycle"
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout"
 
 /**
@@ -37,16 +39,23 @@ type BffSession = {
   appHomeLabel?: string | null
 }
 
-let onSessionExpired: ((returnTo: string) => void) | null = null
-
-/** 应用启动时注册会话过期跳转（模板组件层契约）。 */
-export function registerSessionExpiredHandler(handler: (returnTo: string) => void) {
-  onSessionExpired = handler
+function isBffSession(value: unknown): value is BffSession {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return typeof raw.subject === "string" && raw.subject.trim().length > 0
+    && Array.isArray(raw.roles) && raw.roles.every((role) => typeof role === "string")
+    && ["name", "nickname", "email", "appHomeUrl", "appHomeLabel"].every(
+      (key) => raw[key] == null || typeof raw[key] === "string",
+    )
 }
 
-/** 401 统一入口：模板 apiFetch 抛 401 前的钩子走这里。 */
+/** A rejected resource triggers a merged session recheck, never direct navigation/replay. */
 export function handleUnauthorized() {
-  onSessionExpired?.(window.location.pathname)
+  meAuthLifecycle.unauthorized(window.location.pathname + window.location.search)
+}
+
+export class AuthResponseError extends Error {
+  constructor(readonly status: number, message: string) {super(message)}
 }
 
 async function responseError(response: Response): Promise<Error> {
@@ -57,20 +66,21 @@ async function responseError(response: Response): Promise<Error> {
   } catch {
     // Keep the status fallback for empty or non-JSON failures.
   }
-  return new Error(message)
+  return new AuthResponseError(response.status, message)
 }
 
 export const sessionApi = {
   /** 会话探测：未登录/会话失效（401）静默收敛为 null，守卫据此送 /login 桥接页。 */
-  async me(): Promise<Session | null> {
+  async me(signal?: AbortSignal): Promise<Session | null> {
     return fetchWithTimeout(
       "/me/api/session",
-      { headers: { "X-Requested-With": "XMLHttpRequest" } },
+      { signal, headers: { "X-Requested-With": "XMLHttpRequest" } },
       async (res) => {
         if (res.status === 401) return null
         if (!res.ok) throw await responseError(res)
-        if (!(res.headers.get("content-type") ?? "").includes("application/json")) return null
-        const raw = (await res.json()) as BffSession
+        if (!(res.headers.get("content-type") ?? "").includes("application/json")) throw new Error("会话响应格式无效")
+        const raw: unknown = await res.json()
+        if (!isBffSession(raw)) throw new Error("会话响应格式无效")
         return {
           displayName: raw.nickname ?? raw.name ?? raw.subject,
           email: raw.email ?? undefined,
@@ -85,7 +95,7 @@ export const sessionApi = {
     )
   },
 
-  /** 登出：防伪令牌成对 POST（注意 BFF 头是 X-XSRF-Token，IDP MFA 端点才是 RequestVerificationToken）。 */
+  /** Only fetch CSRF admission; a native form owns the full BFF/IdP logout navigation. */
   async logout(): Promise<void> {
     const token = await fetchWithTimeout(
       "/me/api/antiforgery",
@@ -96,33 +106,29 @@ export const sessionApi = {
       },
       10_000,
     )
-    await fetchWithTimeout(
-      "/me/api/logout",
-      {
-        method: "POST",
-        headers: { "X-XSRF-Token": token, "X-Requested-With": "XMLHttpRequest" },
-      },
-      async (response) => {
-        if (!response.ok) throw await responseError(response)
-      },
-      10_000,
-    )
-    window.location.assign("/me/login")
+    if (typeof token !== "string" || !token) throw new Error("退出请求缺少防伪凭据。")
+    const form = document.createElement("form")
+    form.method = "post"
+    form.action = "/me/api/logout"
+    form.hidden = true
+    const field = document.createElement("input")
+    field.type = "hidden"
+    field.name = "__RequestVerificationToken"
+    field.value = token
+    form.append(field)
+    document.body.append(form)
+    try { HTMLFormElement.prototype.submit.call(form) }
+    finally { form.remove() }
   },
 }
 
 /** 会话查询：无会话=null（守卫据此跳登录），Query 缓存单飞。 */
 export function useSession() {
-  return useQuery({ queryKey: ["session"], queryFn: sessionApi.me, staleTime: 60_000, retry: false })
+  const auth = useAuthState()
+  return useQuery({ enabled: !auth.lifecycle, queryKey: ["session"], queryFn: ({ signal }) => sessionApi.me(signal), staleTime: 60_000, retry: false })
 }
 
 export function useLogout() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => sessionApi.logout(),
-    onSuccess: () => {
-      qc.setQueryData(["session"], null)
-      qc.clear()
-    },
-  })
+  const auth = useAuthState()
+  return useMutation({mutationFn: () => auth.lifecycle ? auth.logout() : sessionApi.logout()})
 }

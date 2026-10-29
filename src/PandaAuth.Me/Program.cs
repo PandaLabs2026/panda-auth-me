@@ -145,6 +145,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddHealthChecks();
 // Revocations must remain visible across cookie validation and logout request scopes.
 builder.Services.AddSingleton<MeSessionLifecycle>();
+builder.Services.AddSingleton<MeLogoutProof>();
 
 // IDP 侧取值集中取出：OpenIddict 客户端注册与登出撤销客户端共用同一组配置，避免两份事实源。
 var issuer = new Uri(builder.Configuration["Auth:Issuer"] ?? "http://localhost:9004/");
@@ -280,6 +281,22 @@ var app = builder.Build();
 if (clientCredentials is null)
     app.Logger.LogWarning("Development 使用临时客户端密钥；重启会使在途登录 state 失效。");
 
+// Native document logout must preserve a truthful terminal even if the IdP handoff throws.
+// Keep Set-Cookie from any completed local clear; do not affect JSON/AJAX exception behavior.
+app.Use(async (context, next) =>
+{
+    try {await next(context);}
+    catch (Exception exception) when (IsNativeLogoutForm(context) && !context.Response.HasStarted)
+    {
+        context.Response.Headers.Remove("Location");
+        context.Response.ContentLength = null;
+        app.Logger.LogError(new EventId(4601, "NativeLogoutHandoffFailed"),
+            "Native logout handoff failed ({ExceptionType}); inspect session status before retrying.", exception.GetType().Name);
+        await LogoutFailure(context, StatusCodes.Status500InternalServerError,
+            "退出交接未完成。请核实本应用与身份中心的当前登录状态。").ExecuteAsync(context);
+    }
+});
+
 // Legacy host-network runtime trusts loopback; tenant bridge runtime trusts only its exact Docker gateway.
 app.UseForwardedHeaders(app.Services.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value);
 
@@ -289,6 +306,17 @@ app.UseForwardedHeaders(app.Services.GetRequiredService<IOptions<ForwardedHeader
 // （与 admin 仓 Program.cs 的显式模式对齐）。
 app.UseAuthentication();
 app.UseMiddleware<TenantHostContextMiddleware>();
+// A top-level logout must stop on missing admission, never challenge into login.
+app.Use(async (context, next) =>
+{
+    if (IsNativeLogoutForm(context) && context.User.Identity?.IsAuthenticated != true)
+    {
+        await LogoutFailure(context, StatusCodes.Status401Unauthorized,
+            "当前登录状态无法完成退出，请明确选择后续操作。").ExecuteAsync(context);
+        return;
+    }
+    await next(context);
+});
 app.UseAuthorization();
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
@@ -297,11 +325,17 @@ app.UseStaticFiles();
 // 登录：challenge 到同域 IDP（用户看到 PandaAuth 统一登录页）。
 // returnUrl 是查询串里的用户输入，登录后会直接成为跳转目标——不经校验即是开放重定向。
 // 校验规则与理由集中在 LoginReturnUrl（可单测），此处不重复判定。
-app.MapGet("/me/login", (string? returnUrl) =>
-    Results.Challenge(new AuthenticationProperties
-    {
-        RedirectUri = LoginReturnUrl.Sanitize(returnUrl),
-    }));
+app.MapGet("/me/login", (HttpContext context) =>
+{
+    if (context.Request.Query["returnUrl"].Count > 1)
+        return Results.Content(MeAuthPage.Render("登录未完成", ["登录来源无效，请明确选择后续操作。"], true),
+            "text/html; charset=utf-8", statusCode: StatusCodes.Status400BadRequest);
+    var returnUrl = context.Request.Query["returnUrl"].ToString();
+    if (context.Request.Query.ContainsKey("error"))
+        return Results.Content(MeAuthPage.Render("登录未完成", ["身份中心未完成本次登录，请明确选择重试。"],
+            false, returnUrl, "重试登录"), "text/html; charset=utf-8");
+    return Results.Challenge(new AuthenticationProperties { RedirectUri = LoginReturnUrl.Sanitize(returnUrl) });
+}).AllowAnonymous();
 
 // OIDC 回调：复制身份与令牌到本服务会话 Cookie。
 app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
@@ -309,7 +343,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     var result = await context.AuthenticateAsync(OpenIddictClientAspNetCoreDefaults.AuthenticationScheme);
     if (result is not { Succeeded: true } || result.Principal is null)
     {
-        return Results.Redirect("/me/");
+        return Results.Content(MeAuthPage.Render("登录未完成", ["未能确认本次登录结果，请明确选择重试。"], false), "text/html; charset=utf-8");
     }
 
     if (!TenantHostContext.TryValidate(context, result.Principal, out _, tenantRoutingEnabled))
@@ -384,7 +418,9 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
     }
     catch (AntiforgeryValidationException)
     {
-        return Results.BadRequest();
+        return IsNativeLogoutForm(context)
+            ? LogoutFailure(context, StatusCodes.Status400BadRequest, "退出请求已失效，请重新发起。")
+            : Results.BadRequest();
     }
 
     // 撤销必须排在 SignOutAsync 之前：Cookie 一清，票据里的令牌就再也取不回来了。
@@ -403,7 +439,9 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException)
         {
-            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "会话撤销服务不可用");
+            return IsNativeLogoutForm(context)
+                ? LogoutFailure(context, StatusCodes.Status503ServiceUnavailable, "会话撤销服务暂不可用。")
+                : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "会话撤销服务不可用");
         }
     }
     sessionLifecycle.Revoke(session.Principal ?? context.User, session.Properties);
@@ -414,10 +452,42 @@ app.MapPost("/me/api/logout", async (HttpContext context, IAntiforgery antiforge
         TenantOidcRouting.ResolveIssuer(context.Request, issuer));
 
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    context.Response.Cookies.Append(MeLogoutProof.CookieName,
+        context.RequestServices.GetRequiredService<MeLogoutProof>().Create(DateTimeOffset.UtcNow),
+        MeLogoutProof.CookieOptions);
     return Results.SignOut(
-        new AuthenticationProperties { RedirectUri = "/me/" },
+        new AuthenticationProperties { RedirectUri = "/me/signed-out" },
         [OpenIddictClientAspNetCoreDefaults.AuthenticationScheme]);
 });
+
+static bool IsNativeLogoutForm(HttpContext context) =>
+    context.Request.Path == "/me/api/logout" && context.Request.HasFormContentType &&
+    context.Request.Headers["X-Requested-With"] != "XMLHttpRequest";
+
+static IResult LogoutFailure(HttpContext context, int status, string detail)
+{
+    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers.XFrameOptions = "DENY";
+    context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; frame-ancestors 'none'";
+    return Results.Content(MeAuthPage.Render("退出未完成", [detail,
+        "当前会话未确认已注销。请返回账户中心重新发起退出；此页面不会自动重试。"], true),
+        "text/html; charset=utf-8", statusCode: status);
+}
+
+app.MapGet("/me/signed-out", (HttpContext context, MeLogoutProof proof) =>
+{
+    var confirmed = proof.Validate(context.Request.Cookies[MeLogoutProof.CookieName], DateTimeOffset.UtcNow,
+        context.User.Identity?.IsAuthenticated == true);
+    context.Response.Cookies.Delete(MeLogoutProof.CookieName, MeLogoutProof.CookieOptions);
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Content(MeAuthPage.Render("退出状态", [
+        confirmed ? "本应用的本地会话已清除。" : "本应用的本地退出结果未确认。",
+        "身份中心及关联应用的退出结果未确认。",
+        "如需重新进入账户中心，请明确选择继续登录。"], false), "text/html; charset=utf-8");
+}).AllowAnonymous();
+app.MapGet("/me/callback/logout/{provider}", () => Results.Redirect("/me/signed-out")).AllowAnonymous();
 
 // 会话查询（SPA 用）：未登录 401，前端引导跳 /me/login。
 app.MapGet("/me/api/session", async (HttpContext context, MeSessionValidator validator) =>

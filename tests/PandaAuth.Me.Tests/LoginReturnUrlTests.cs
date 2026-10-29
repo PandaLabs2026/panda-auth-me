@@ -52,4 +52,23 @@ public class LoginReturnUrlTests
     {
         Assert.Equal(returnUrl, LoginReturnUrl.Sanitize(returnUrl));
     }
+    [Theory]
+    [InlineData("/me/login")]
+    [InlineData("/me/sign-in")]
+    [InlineData("/me/callback/login/pandaauth")]
+    [InlineData("/me/api/session")]
+    [InlineData("/me/signed-out")]
+    [InlineData("/me/logout")]
+    [InlineData("/me/./security")]
+    [InlineData("/me/%2e%2e/security")]
+    [InlineData("/me//security")]
+    [InlineData("/me/security#fragment")]
+    [InlineData("/me/security?q=%250d%250aLocation%3Aevil")]
+    public void Sanitize_Rejects_Protocol_And_Ambiguous_Returns(string target)
+        => Assert.Equal(LoginReturnUrl.Fallback, LoginReturnUrl.Sanitize(target));
+
+    [Fact]
+    public void Sanitize_Preserves_Encoded_Business_Query()
+        => Assert.Equal("/me/security?q=%E8%B4%A6%E6%88%B7%20check&page=2",
+            LoginReturnUrl.Sanitize("/me/security?q=%E8%B4%A6%E6%88%B7%20check&page=2"));
 }

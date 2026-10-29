@@ -48,3 +48,20 @@ describe("fetchWithTimeout", () => {
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 })
+
+
+it("respects caller cancellation before the timeout without replaying the request", async () => {
+  const controller = new AbortController()
+  const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+  }))
+  vi.stubGlobal("fetch", fetchMock)
+  const pending = fetchWithTimeout("/api", {signal: controller.signal}, async () => undefined, 50)
+  const rejected = expect(pending).rejects.toMatchObject({name: "AbortError"})
+  controller.abort()
+  const cancelledByCaller = fetchMock.mock.calls[0]?.[1]?.signal?.aborted
+  await rejected
+  expect(cancelledByCaller).toBe(true)
+  expect(fetchMock).toHaveBeenCalledOnce()
+  vi.unstubAllGlobals()
+})

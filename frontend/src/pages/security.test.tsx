@@ -1,7 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import SecurityPage from "@/pages/security"
+import { SessionGate } from "@/app/SessionGate"
+import { useSession } from "@/lib/auth"
+import { meAuthLifecycle } from "@/lib/auth-lifecycle"
+import { MfaRequestError, StaleMfaResponseError, mfaApi } from "@/lib/mfa-api"
 import { Providers } from "@/test/utils"
 
 function jsonResponse(body: unknown, status = 200) {
@@ -11,7 +15,7 @@ function jsonResponse(body: unknown, status = 200) {
 type RecordedCall = { url: string; body: unknown; grantHeader?: string }
 
 /** 按前缀路由 mock fetch（长前缀放前面），并记录写请求的授权头供断言。 */
-function routeFetch(routes: Array<[string, () => Response]>) {
+function routeFetch(routes: Array<[string, () => Response | Promise<Response>]>) {
   const calls: RecordedCall[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
@@ -36,7 +40,7 @@ const antiforgery: [string, () => Response] = [
   () => jsonResponse({ token: "test-token" }),
 ]
 
-const totpUserState = (): Array<[string, () => Response]> => [
+const totpUserState = (): Array<[string, () => Response | Promise<Response>]> => [
   [
     "/account/mfa/user/status",
     () => jsonResponse({ hasActiveFactor: true, requiresReconfiguration: false, recoveryCodeCount: 10 }),
@@ -52,12 +56,14 @@ const totpUserState = (): Array<[string, () => Response]> => [
 
 afterEach(() => {
   cleanup()
+  sessionStorage.clear()
+  meAuthLifecycle.pause(false)
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe("SecurityPage", () => {
-  it("sends the user back to login when the IDP answers with an HTML login redirect", async () => {
+  it("shows malformed identity responses as unavailable without declaring an expired session", async () => {
     routeFetch([
       ["/account/mfa/user/status", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
       ["/account/mfa/user/factors", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
@@ -65,7 +71,7 @@ describe("SecurityPage", () => {
 
     render(<Providers><SecurityPage /></Providers>)
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/登录状态已失效/)
+    expect(await screen.findByRole("alert")).toHaveTextContent(/无效响应/)
   })
 
   it("renders the single TOTP factor with a replace hint and no revoke button", async () => {
@@ -158,4 +164,87 @@ describe("SecurityPage", () => {
     expect(await screen.findByText(/当前密码不正确/)).toBeInTheDocument()
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
+})
+
+const grantRequired = () => jsonResponse({mfaGrantRequired: true, operation: "self.totp-enroll", targetId: "user-1", parameters: {}, passwordRequired: true}, 403)
+const bffSession = (subject = "user-1") => jsonResponse({subject, name: "Fixture", nickname: null, email: null, roles: [], appHomeUrl: null})
+function Subject() {const session = useSession(); return <span>{session.data?.subject}</span>}
+function protectedSecurity() {return render(<Providers initialEntries={["/security"]}><SessionGate><Subject/><SecurityPage/></SessionGate></Providers>)}
+async function openGrant() {
+ const user = userEvent.setup(); await screen.findAllByText("TOTP 验证器")
+ await user.click(screen.getByRole("button", {name: "更换 TOTP"}))
+ await user.type(await screen.findByLabelText(/输入认证器 6 位验证码/), "123456")
+ await user.type(screen.getByLabelText(/当前密码/), "fixture-private-password")
+ return user
+}
+it("hides the portaled MFA dialog while paused and preserves its draft for the same subject", async () => {
+ let pausedCheck = false; let finish!: (value: Response) => void
+ const calls = routeFetch([["/me/api/session", () => pausedCheck ? new Promise<Response>(resolve => {finish = resolve}) : bffSession()], antiforgery, ["/account/mfa/user/totp/options", grantRequired], ...totpUserState()])
+ protectedSecurity(); await openGrant()
+ pausedCheck = true; act(() => meAuthLifecycle.unauthorized())
+ await waitFor(() => expect(finish).toBeDefined())
+ const visiblePortalWhilePaused = screen.queryByRole("dialog") !== null
+ await act(async () => finish(jsonResponse({}, 401)))
+ expect(await screen.findByRole("heading", {name: "登录已过期"})).toBeInTheDocument()
+ expect(visiblePortalWhilePaused).toBe(false)
+ pausedCheck = false; act(() => meAuthLifecycle.unauthorized())
+ expect(await screen.findByLabelText(/当前密码/)).toHaveValue("fixture-private-password")
+ expect(screen.getByLabelText(/输入认证器 6 位验证码/)).toHaveValue("123456")
+ expect(calls.filter(call => call.url.includes("/totp/options"))).toHaveLength(1)
+})
+it("discards prior-subject MFA state on a forced session check without replaying an operation", async () => {
+ let subject = "user-1"
+ const calls = routeFetch([["/me/api/session", () => bffSession(subject)], antiforgery, ["/account/mfa/user/totp/options", grantRequired], ...totpUserState()])
+ protectedSecurity(); await openGrant()
+ subject = "user-2"; act(() => meAuthLifecycle.unauthorized())
+ await screen.findByText("user-2")
+ expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+ expect(document.querySelector("#grant-password")).toBeNull()
+ expect(calls.filter(call => call.url.includes("/totp/options"))).toHaveLength(1)
+})
+it("does not use an operation grant that completes after the authentication epoch changed", async () => {
+ let finish!: (value: {grantId: string; expiresAt: string}) => void
+ vi.spyOn(mfaApi, "requestGrant").mockImplementation(() => new Promise(resolve => {finish = resolve}))
+ const calls = routeFetch([antiforgery, ["/account/mfa/user/totp/options", grantRequired], ...totpUserState()])
+ render(<Providers><SecurityPage/></Providers>); const user = await openGrant()
+ await user.click(screen.getByRole("button", {name: "验证并继续"}))
+ act(() => {meAuthLifecycle.pause(true); meAuthLifecycle.pause(false)})
+ await act(async () => finish({grantId: "fixture-obsolete-grant", expiresAt: "2026-10-30T00:00:00Z"}))
+ expect(calls.filter(call => call.url.includes("/totp/options"))).toHaveLength(1)
+})
+
+it("keeps a manual identity reauthentication action when the BFF session remains valid", async () => {
+ const calls = routeFetch([["/me/api/session", () => bffSession()], antiforgery, ["/account/mfa/user/totp/options", () => jsonResponse({}, 401)], ...totpUserState()])
+ protectedSecurity(); const user = userEvent.setup(); await screen.findAllByText("TOTP 验证器")
+ await user.click(screen.getByRole("button", {name: "更换 TOTP"}))
+ expect(await screen.findByRole("link", {name: "重新认证"})).toBeInTheDocument()
+ expect(calls.filter(call => call.url.includes("/totp/options"))).toHaveLength(1)
+})
+it("drops cancelled password and OTP drafts instead of retaining a phantom leave warning", async () => {
+ routeFetch([["/me/api/session", () => bffSession()], antiforgery, ["/account/mfa/user/totp/options", grantRequired], ...totpUserState()])
+ protectedSecurity(); const user = await openGrant()
+ expect(meAuthLifecycle.reasons().join()).toMatch(/MFA/)
+ await user.click(screen.getByRole("button", {name: "取消"}))
+ await waitFor(() => expect(meAuthLifecycle.reasons().join()).not.toMatch(/未完成的MFA/))
+ expect(document.querySelector("#grant-password")).toBeNull()
+})
+it("submits an operation grant once while verification is pending", async () => {
+ const finish: Array<(value: {grantId: string; expiresAt: string}) => void> = []
+ const grant = vi.spyOn(mfaApi, "requestGrant").mockImplementation(() => new Promise(resolve => {finish.push(resolve)}))
+ routeFetch([antiforgery, ["/account/mfa/user/totp/options", grantRequired], ...totpUserState()])
+ render(<Providers><SecurityPage/></Providers>); const user = await openGrant()
+ await user.dblClick(screen.getByRole("button", {name: "验证并继续"}))
+ const attempts = grant.mock.calls.length
+ await act(async () => finish.forEach(resolve => resolve({grantId: "fixture-grant", expiresAt: "2026-10-30T00:00:00Z"})))
+ expect(attempts).toBe(1)
+})
+
+it("retains verified identity expiry when a concurrent read is cancelled first", async () => {
+ vi.spyOn(mfaApi, "status").mockImplementation(async () => {
+  await new Promise(resolve => setTimeout(resolve, 10))
+  throw new MfaRequestError(401, "身份会话已失效")
+ })
+ vi.spyOn(mfaApi, "factors").mockRejectedValue(new StaleMfaResponseError())
+ render(<Providers><SecurityPage /></Providers>)
+ expect(await screen.findByRole("link", {name: "重新认证"})).toBeInTheDocument()
 })

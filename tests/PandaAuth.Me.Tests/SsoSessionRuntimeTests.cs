@@ -21,11 +21,16 @@ namespace PandaAuth.Me.Tests;
 public sealed class SsoSessionRuntimeTests
 {
     [Theory]
-    [InlineData("user", true)]
-    [InlineData("user", false)]
-    [InlineData(null, true)]
-    [InlineData(null, false)]
-    public async Task SharedLogout_RevokesLinkedSession_ButPreservesAnotherDevice(string? role, bool sharedLogoutEnabled)
+    [InlineData("user", true, false, false)]
+    [InlineData("user", true, true, false)]
+    [InlineData("user", false, false, false)]
+    [InlineData("user", false, true, false)]
+    [InlineData(null, true, false, false)]
+    [InlineData(null, true, true, false)]
+    [InlineData(null, false, false, false)]
+    [InlineData(null, false, true, false)]
+    [InlineData("user", true, true, true)]
+    public async Task SharedLogout_RevokesLinkedSession_ButPreservesAnotherDevice(string? role, bool sharedLogoutEnabled, bool native, bool handoffFailure)
     {
         var state = new CentralState();
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -37,6 +42,10 @@ public sealed class SsoSessionRuntimeTests
             builder.UseSetting("Auth:Issuer", "https://idp.example.invalid/");
             builder.ConfigureServices(services =>
             {
+                services.AddOpenIddict().AddClient(configuration => configuration.AddEventHandler<OpenIddictClientEvents.ProcessSignOutContext>(descriptor => descriptor.UseInlineHandler(context => {
+                    if (handoffFailure) throw new InvalidOperationException("fixture-signout-failure");
+                    return default;
+                })));
                 services.AddHttpClient("session-state").ConfigurePrimaryHttpMessageHandler(() => new CentralHandler(state));
                 services.AddHttpClient(MeSessionValidator.ClientName).ConfigurePrimaryHttpMessageHandler(() => new CentralHandler(state));
                 services.AddHttpClient<TokenRevocationClient>().ConfigurePrimaryHttpMessageHandler(() => new CentralHandler(state));
@@ -91,9 +100,15 @@ public sealed class SsoSessionRuntimeTests
         state.RevokeUnavailable = true;
         using (var failedRequest = new HttpRequestMessage(HttpMethod.Post, "/me/api/logout"))
         {
-            failedRequest.Headers.Add("X-XSRF-Token", payload.GetProperty("token").GetString());
+            if (native) failedRequest.Content = new FormUrlEncodedContent(new Dictionary<string,string> { ["__RequestVerificationToken"] = payload.GetProperty("token").GetString()! });
+            else failedRequest.Headers.Add("X-XSRF-Token", payload.GetProperty("token").GetString());
             using var failed = await client.SendAsync(failedRequest);
             Assert.Equal(HttpStatusCode.ServiceUnavailable, failed.StatusCode);
+            if (native) {
+                Assert.Equal("text/html", failed.Content.Headers.ContentType?.MediaType);
+                Assert.Contains("退出未完成", await failed.Content.ReadAsStringAsync());
+                Assert.Null(failed.Headers.Location);
+            }
         }
         using (var retryable = await client.GetAsync("/me/api/session"))
             Assert.Equal(HttpStatusCode.OK, retryable.StatusCode);
@@ -101,9 +116,28 @@ public sealed class SsoSessionRuntimeTests
         state.RevokeUnavailable = false;
         }
         using var request = new HttpRequestMessage(HttpMethod.Post, "/me/api/logout");
-        request.Headers.Add("X-XSRF-Token", payload.GetProperty("token").GetString());
+        if (native) request.Content = new FormUrlEncodedContent(new Dictionary<string,string> { ["__RequestVerificationToken"] = payload.GetProperty("token").GetString()! });
+        else request.Headers.Add("X-XSRF-Token", payload.GetProperty("token").GetString());
         using var logout = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
+        if (handoffFailure) {
+            Assert.Equal(HttpStatusCode.InternalServerError, logout.StatusCode);
+            Assert.Equal("text/html", logout.Content.Headers.ContentType?.MediaType);
+            var html = await logout.Content.ReadAsStringAsync();
+            Assert.Contains("退出未完成", html);
+            Assert.DoesNotContain("fixture-signout-failure", html);
+            Assert.Null(logout.Headers.Location);
+        } else Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
+        var localProof = logout.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith(MeLogoutProof.CookieName + "=", StringComparison.Ordinal));
+        Assert.Contains("secure", localProof, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("httponly", localProof, StringComparison.OrdinalIgnoreCase);
+        UseCookie(localProof.Split(';')[0]);
+        using (var terminal = await client.GetAsync("/me/signed-out")) {
+            Assert.Equal(HttpStatusCode.OK, terminal.StatusCode);
+            var html = await terminal.Content.ReadAsStringAsync();
+            Assert.Contains("本应用的本地会话已清除", html);
+            Assert.Contains("身份中心及关联应用的退出结果未确认", html);
+            Assert.Null(terminal.Headers.Location);
+        }
         Assert.Equal(sharedLogoutEnabled, state.Revoked.Contains(sidA));
         UseCookie(cookieA);
         using var revoked = await client.GetAsync("/me/api/session");

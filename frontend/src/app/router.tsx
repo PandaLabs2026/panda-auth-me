@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect } from "react"
-import { createBrowserRouter, useNavigate } from "react-router"
+import { lazy, Suspense } from "react"
+import { createBrowserRouter } from "react-router"
 import { ExternalLinkIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
 import AppLayout, { type NavItem } from "@/components/patterns/AppLayout"
 import HeaderActions from "@/components/header-actions"
@@ -9,7 +9,7 @@ import LoginPage from "@/pages/login"
 import NotFoundPage from "@/pages/NotFoundPage"
 import ServerErrorPage from "@/pages/ServerErrorPage"
 import { useI18n } from "@/lib/i18n"
-import { sessionApi, registerSessionExpiredHandler } from "@/lib/auth"
+import { sessionApi, useLogout } from "@/lib/auth"
 import { notify } from "@/lib/notify"
 
 /**
@@ -37,6 +37,7 @@ const page = (node: React.ReactNode) => <Suspense fallback={<PageFallback />}>{n
 /** 布局组装(模板 AppLayout 之上的应用层):品牌/导航/顶栏常驻件/命令面板动作。 */
 export function AppShell() {
   const { t } = useI18n()
+  const logout = useLogout()
   const navItems: NavItem[] = [
     { to: "/", label: t("账户总览"), icon: UserRoundIcon, end: true },
     { to: "/security", label: t("安全设置"), icon: ShieldCheckIcon },
@@ -67,31 +68,20 @@ export function AppShell() {
           label: t("退出登录"),
           icon: LogOutIcon,
           shortcut: "⌘⇧Q",
-          run: () => void sessionApi.logout().catch((error) => notify.failure(error, "退出登录失败；当前会话未确认已注销。")),
+          run: () => void logout.mutateAsync().catch((error) => notify.failure(error, "退出登录失败；当前会话未确认已注销。")),
         },
       ]}
     />
   )
 }
 
-/** 401 → 会话过期处理:账户中心无 SPA 登录页,/login 桥接页整页跳 BFF 挑战。 */
-function SessionExpiredBridge() {
-  const navigate = useNavigate()
-  useEffect(() => {
-    registerSessionExpiredHandler((from) =>
-      navigate("/login", { replace: true, state: { from: from.startsWith("/") ? from : "/" } }),
-    )
-  }, [navigate])
-  return null
-}
-
 export const router = createBrowserRouter(
   [
+    {path: "/sign-in", element: <LoginPage />},
     {
       path: "/login",
       element: (
         <>
-          <SessionExpiredBridge />
           <LoginPage />
         </>
       ),
@@ -100,7 +90,6 @@ export const router = createBrowserRouter(
       path: "/",
       element: (
         <>
-          <SessionExpiredBridge />
           <SessionGate>
             <AppShell />
           </SessionGate>
