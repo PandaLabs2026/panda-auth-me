@@ -12,12 +12,12 @@ describe("sessionApi", () => {
     await expect(sessionApi.me()).resolves.toBeNull()
   })
 
-  it("treats an OIDC HTML login redirect as an absent session", async () => {
+  it("rejects HTML at the JSON session boundary instead of assuming anonymous", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("<html>login</html>", {
       status: 200,
       headers: { "content-type": "text/html" },
     }))))
-    await expect(sessionApi.me()).resolves.toBeNull()
+    await expect(sessionApi.me()).rejects.toThrow()
   })
 
   it("surfaces session endpoint failures instead of redirecting as if the user were signed out", async () => {
@@ -49,5 +49,17 @@ describe("sessionApi", () => {
       })))
     await expect(sessionApi.logout()).rejects.toThrow("会话撤销服务不可用")
     expect(assign).not.toHaveBeenCalled()
+  })
+})
+
+
+describe("session payload boundary", () => {
+  it.each([null, {}, {subject: "", roles: []}, {subject: "user", roles: "admin"}, {subject: "user", roles: [], name: 42}])("rejects malformed session %j without inferring authentication", async (payload) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {headers: {"content-type": "application/json"}})))
+    await expect(sessionApi.me()).rejects.toThrow()
+  })
+  it("keeps a valid session and optional nullable fields", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({subject: "user", name: null, nickname: null, email: null, roles: [], appHomeUrl: null}), {headers: {"content-type": "application/json"}})))
+    await expect(sessionApi.me()).resolves.toMatchObject({subject: "user", displayName: "user", roles: []})
   })
 })

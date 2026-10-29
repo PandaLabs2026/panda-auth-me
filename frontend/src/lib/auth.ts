@@ -37,6 +37,16 @@ type BffSession = {
   appHomeLabel?: string | null
 }
 
+function isBffSession(value: unknown): value is BffSession {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const raw = value as Record<string, unknown>
+  return typeof raw.subject === "string" && raw.subject.trim().length > 0
+    && Array.isArray(raw.roles) && raw.roles.every((role) => typeof role === "string")
+    && ["name", "nickname", "email", "appHomeUrl", "appHomeLabel"].every(
+      (key) => raw[key] == null || typeof raw[key] === "string",
+    )
+}
+
 let onSessionExpired: ((returnTo: string) => void) | null = null
 
 /** 应用启动时注册会话过期跳转（模板组件层契约）。 */
@@ -62,15 +72,16 @@ async function responseError(response: Response): Promise<Error> {
 
 export const sessionApi = {
   /** 会话探测：未登录/会话失效（401）静默收敛为 null，守卫据此送 /login 桥接页。 */
-  async me(): Promise<Session | null> {
+  async me(signal?: AbortSignal): Promise<Session | null> {
     return fetchWithTimeout(
       "/me/api/session",
-      { headers: { "X-Requested-With": "XMLHttpRequest" } },
+      { signal, headers: { "X-Requested-With": "XMLHttpRequest" } },
       async (res) => {
         if (res.status === 401) return null
         if (!res.ok) throw await responseError(res)
-        if (!(res.headers.get("content-type") ?? "").includes("application/json")) return null
-        const raw = (await res.json()) as BffSession
+        if (!(res.headers.get("content-type") ?? "").includes("application/json")) throw new Error("会话响应格式无效")
+        const raw: unknown = await res.json()
+        if (!isBffSession(raw)) throw new Error("会话响应格式无效")
         return {
           displayName: raw.nickname ?? raw.name ?? raw.subject,
           email: raw.email ?? undefined,
@@ -113,7 +124,7 @@ export const sessionApi = {
 
 /** 会话查询：无会话=null（守卫据此跳登录），Query 缓存单飞。 */
 export function useSession() {
-  return useQuery({ queryKey: ["session"], queryFn: sessionApi.me, staleTime: 60_000, retry: false })
+  return useQuery({ queryKey: ["session"], queryFn: ({ signal }) => sessionApi.me(signal), staleTime: 60_000, retry: false })
 }
 
 export function useLogout() {
