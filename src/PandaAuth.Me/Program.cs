@@ -281,6 +281,22 @@ var app = builder.Build();
 if (clientCredentials is null)
     app.Logger.LogWarning("Development 使用临时客户端密钥；重启会使在途登录 state 失效。");
 
+// Native document logout must preserve a truthful terminal even if the IdP handoff throws.
+// Keep Set-Cookie from any completed local clear; do not affect JSON/AJAX exception behavior.
+app.Use(async (context, next) =>
+{
+    try {await next(context);}
+    catch (Exception exception) when (IsNativeLogoutForm(context) && !context.Response.HasStarted)
+    {
+        context.Response.Headers.Remove("Location");
+        context.Response.ContentLength = null;
+        app.Logger.LogError(new EventId(4601, "NativeLogoutHandoffFailed"),
+            "Native logout handoff failed ({ExceptionType}); inspect session status before retrying.", exception.GetType().Name);
+        await LogoutFailure(context, StatusCodes.Status500InternalServerError,
+            "退出交接未完成。请核实本应用与身份中心的当前登录状态。").ExecuteAsync(context);
+    }
+});
+
 // Legacy host-network runtime trusts loopback; tenant bridge runtime trusts only its exact Docker gateway.
 app.UseForwardedHeaders(app.Services.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value);
 

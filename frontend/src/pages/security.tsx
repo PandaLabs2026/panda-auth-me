@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import QRCode from "qrcode"
 
+import { useAuthLeaveGuard } from "@/components/patterns/auth/context"
+import { hasUncertainOperation, meAuthLifecycle, meAuthNavigation } from "@/lib/auth-lifecycle"
 import PageHeader from "@/components/patterns/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,7 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { GrantRequiredError, mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
+import { GrantRequiredError, MfaRequestError, StaleMfaResponseError, mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
 import { useI18n } from "@/lib/i18n"
 
 /**
@@ -48,142 +50,137 @@ export default function SecurityPage() {
   const [grantCode, setGrantCode] = useState("")
   const [grantPassword, setGrantPassword] = useState("")
   const [grantError, setGrantError] = useState<string | null>(null)
+  const [reauthenticationNeeded, setReauthenticationNeeded] = useState(false)
+  const lifetime = useRef({mounted: false, load: 0, qr: 0}).current, operation = useRef(false)
+  const paused = useSyncExternalStore(meAuthLifecycle.subscribe, meAuthLifecycle.paused)
+  const uncertain = useSyncExternalStore(meAuthLifecycle.subscribe, hasUncertainOperation)
+  useAuthLeaveGuard(Boolean(busy || totpSetup || recoveryCodes || totpCode || pendingGrant || grantCode || grantPassword), "未完成的MFA操作或未保存的敏感内容")
+  const current = useCallback((epoch: number) => lifetime.mounted && !meAuthLifecycle.paused() && meAuthLifecycle.epoch() === epoch, [lifetime])
+  const reportError = useCallback((cause: unknown, epoch: number) => {
+    if (!lifetime.mounted) return
+    if (cause instanceof MfaRequestError && cause.status === 401) {
+      setReauthenticationNeeded(true); setError(cause.message)
+    } else setError(current(epoch) && cause instanceof Error ? cause.message : new StaleMfaResponseError().message)
+  }, [current, lifetime])
+  function beginOperation(key: string) {
+    if (operation.current || meAuthLifecycle.paused() || hasUncertainOperation() || reauthenticationNeeded) return undefined
+    operation.current = true; setBusy(key); setError(null); setNotice(null)
+    return meAuthLifecycle.epoch()
+  }
+  function finishOperation() {operation.current = false; if (lifetime.mounted) setBusy(null)}
 
   const load = useCallback(async () => {
+    if (meAuthLifecycle.paused()) return
+    const epoch = meAuthLifecycle.epoch(), generation = ++lifetime.load
     try {
-      const [nextStatus, nextFactors] = await Promise.all([mfaApi.status(), mfaApi.factors()])
-      setStatus(nextStatus)
-      setFactors(nextFactors)
+      // A 401 pauses admission and cancels sibling reads. Preserve the verified
+      // identity failure even if that sibling cancellation rejects first.
+      const results = await Promise.allSettled([mfaApi.status(), mfaApi.factors()])
+      const failures = results.filter(result => result.status === "rejected")
+      const identityFailure = failures.find(result => result.reason instanceof MfaRequestError && result.reason.status === 401)
+      if (identityFailure) throw identityFailure.reason
+      if (failures.length) throw failures[0].reason
+      const [statusResult, factorsResult] = results
+      if (statusResult.status !== "fulfilled" || factorsResult.status !== "fulfilled") return
+      const nextStatus = statusResult.value, nextFactors = factorsResult.value
+      if (!current(epoch) || generation !== lifetime.load) throw new StaleMfaResponseError()
+      setStatus(nextStatus); setFactors(nextFactors); setReauthenticationNeeded(false); setError(null)
     } catch (cause) {
-      setError((cause as Error).message)
+      if (generation === lifetime.load) reportError(cause, epoch)
+    } finally {
+      if (lifetime.mounted && generation === lifetime.load) setLoading(false)
     }
-  }, [])
+  }, [current, reportError, lifetime])
 
   useEffect(() => {
-    void load().finally(() => setLoading(false))
-  }, [load])
+    lifetime.mounted = true; void load()
+    return () => {lifetime.mounted = false; lifetime.load++; lifetime.qr++}
+  }, [load, lifetime])
 
   async function run(key: string, action: () => Promise<string | void>) {
-    setBusy(key)
-    setError(null)
-    setNotice(null)
+    const epoch = beginOperation(key); if (epoch === undefined) return
     try {
       const message = await action()
+      if (!current(epoch)) throw new StaleMfaResponseError()
       if (typeof message === "string") setNotice(message)
       await load()
-    } catch (cause) {
-      setError((cause as Error).message)
-    } finally {
-      setBusy(null)
-    }
+    } catch (cause) {reportError(cause, epoch)}
+    finally {finishOperation()}
   }
 
-  /** 特敏感操作统一入口：先裸试，命中 403 授权标记则弹授权对话框，验证后带授权重放。 */
-  async function guarded(
-    key: string,
-    attempt: () => Promise<string | void>,
-    retry: (grantId: string) => Promise<string | void>,
-  ) {
-    setBusy(key)
-    setError(null)
-    setNotice(null)
+  /** A confirmed operation-grant response is retained for explicit verification, never automatically replayed after reauthentication. */
+  async function guarded(key: string, attempt: () => Promise<string | void>, retry: (grantId: string) => Promise<string | void>) {
+    const epoch = beginOperation(key); if (epoch === undefined) return
     try {
       let message: string | void
-      try {
-        message = await attempt()
-      } catch (cause) {
-        if (cause instanceof GrantRequiredError) {
-          setGrantCode("")
-          setGrantPassword("")
-          setGrantError(null)
-          setPendingGrant({
-            operation: cause.operation,
-            targetId: cause.targetId,
-            parameters: cause.parameters,
-            passwordRequired: cause.passwordRequired,
-            retry,
-          })
-          return
-        }
-        throw cause
+      try {message = await attempt()}
+      catch (cause) {
+        if (!(cause instanceof GrantRequiredError)) throw cause
+        if (!current(epoch)) throw new StaleMfaResponseError()
+        setGrantCode(""); setGrantPassword(""); setGrantError(null)
+        setPendingGrant({operation: cause.operation, targetId: cause.targetId, parameters: cause.parameters, passwordRequired: cause.passwordRequired, retry})
+        return
       }
+      if (!current(epoch)) throw new StaleMfaResponseError()
       if (typeof message === "string") setNotice(message)
       await load()
-    } catch (cause) {
-      setError((cause as Error).message)
-    } finally {
-      setBusy(null)
-    }
+    } catch (cause) {reportError(cause, epoch)}
+    finally {finishOperation()}
   }
 
   async function submitGrant() {
-    if (!pendingGrant) return
+    const grant = pendingGrant
+    if (!grant) return
+    const epoch = beginOperation("grant"); if (epoch === undefined) return
     setGrantError(null)
     try {
-      const { grantId } = await mfaApi.requestGrant(
-        pendingGrant.operation,
-        pendingGrant.targetId,
-        pendingGrant.parameters,
-        grantCode,
-        pendingGrant.passwordRequired ? grantPassword : undefined,
-      )
-      const retry = pendingGrant.retry
-      const message = await retry(grantId)
-      setPendingGrant(null)
+      const {grantId} = await mfaApi.requestGrant(grant.operation, grant.targetId, grant.parameters, grantCode,
+        grant.passwordRequired ? grantPassword : undefined)
+      if (!current(epoch)) throw new StaleMfaResponseError()
+      const message = await grant.retry(grantId)
+      if (!current(epoch)) throw new StaleMfaResponseError()
+      setPendingGrant(null); setGrantCode(""); setGrantPassword("")
       if (typeof message === "string") setNotice(message)
       await load()
     } catch (cause) {
-      setGrantError((cause as Error).message)
-    }
+      if (lifetime.mounted) {
+        setGrantError(current(epoch) && cause instanceof Error ? cause.message : new StaleMfaResponseError().message)
+        if (cause instanceof MfaRequestError && cause.status === 401) reportError(cause, epoch)
+      }
+    } finally {finishOperation()}
   }
 
-  function beginTotpSetup(setup: { factorId: string; secret: string; provisioningUri: string }) {
-    setTotpSetup(setup)
-    setTotpCode("")
-    void (async () => {
-      try {
-        setTotpQrSvg(await QRCode.toString(setup.provisioningUri, { type: "svg", margin: 1, width: 180 }))
-      } catch {
-        setTotpQrSvg(null)
-      }
-    })()
+  function closeGrant() {
+    if (operation.current) return
+    setPendingGrant(null); setGrantCode(""); setGrantPassword(""); setGrantError(null)
+  }
+
+  function beginTotpSetup(setup: {factorId: string; secret: string; provisioningUri: string}) {
+    const epoch = meAuthLifecycle.epoch(), generation = ++lifetime.qr
+    setTotpSetup(setup); setTotpCode("")
+    void QRCode.toString(setup.provisioningUri, {type: "svg", margin: 1, width: 180}).then(svg => {
+      if (current(epoch) && generation === lifetime.qr) setTotpQrSvg(svg)
+    }).catch(() => {if (current(epoch) && generation === lifetime.qr) setTotpQrSvg(null)})
   }
 
   function onBeginTotp() {
-    // 首次绑定（无可验证因子）不需要授权；更换（已有 TOTP）由服务端 403 引导进授权对话框。
-    setBusy("totp-begin")
-    setError(null)
-    setNotice(null)
-    void (async () => {
-      try {
-        beginTotpSetup(await mfaApi.totpOptions())
-      } catch (cause) {
-        if (cause instanceof GrantRequiredError) {
-          setGrantCode("")
-          setGrantPassword("")
-          setGrantError(null)
-          setPendingGrant({
-            operation: cause.operation,
-            targetId: cause.targetId,
-            parameters: cause.parameters,
-            passwordRequired: cause.passwordRequired,
-            retry: async (grantId) => {
-              beginTotpSetup(await mfaApi.totpOptions(grantId))
-            },
-          })
-          return
-        }
-        setError((cause as Error).message)
-      } finally {
-        setBusy(null)
-      }
-    })()
+    void guarded("totp-begin", async () => {
+      const epoch = meAuthLifecycle.epoch(), setup = await mfaApi.totpOptions()
+      if (!current(epoch)) throw new StaleMfaResponseError()
+      beginTotpSetup(setup)
+    }, async grantId => {
+      const epoch = meAuthLifecycle.epoch(), setup = await mfaApi.totpOptions(grantId)
+      if (!current(epoch)) throw new StaleMfaResponseError()
+      beginTotpSetup(setup)
+    })
   }
 
   function onConfirmTotp() {
     if (!totpSetup) return
     void run("totp-confirm", async () => {
+      const epoch = meAuthLifecycle.epoch()
       await mfaApi.totpConfirm(totpSetup.factorId, totpCode)
+      if (!current(epoch)) throw new StaleMfaResponseError()
       setTotpSetup(null)
       setTotpQrSvg(null)
       setTotpCode("")
@@ -192,7 +189,8 @@ export default function SecurityPage() {
   }
 
   async function generateRecoveryCodes(grantId?: string) {
-    const codes = await mfaApi.recoveryCodes(grantId)
+    const epoch = meAuthLifecycle.epoch(), codes = await mfaApi.recoveryCodes(grantId)
+    if (!current(epoch)) throw new StaleMfaResponseError()
     setRecoveryCodes(codes)
     await load()
   }
@@ -229,6 +227,15 @@ export default function SecurityPage() {
               {notice}
             </p>
           )}
+          {uncertain && <p role="alert" className="text-destructive">{t("操作结果待核实。请先重新读取安全设置并核实结果，不要重复提交原操作。")}</p>}
+          {(error || uncertain) && <div className="flex flex-wrap gap-2">
+            <Button variant="outline" disabled={paused || busy !== null} onClick={() => void load()}>{t("重新读取安全设置")}</Button>
+            {(reauthenticationNeeded || uncertain) && <Button asChild variant="outline"><a href={meAuthNavigation.href("/me/security")} onClick={event => {
+              event.preventDefault()
+              if (meAuthLifecycle.reasons().length && !window.confirm(t("重新认证将离开当前页面。请先保留必要内容并核实待定操作结果；确认离开？"))) return
+              meAuthNavigation.start("/me/security", true)
+            }}>{t("重新认证")}</a></Button>}
+          </div>}
           {status?.requiresReconfiguration && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               {t("账号带有旧版两步验证标记但没有可用因子：下次登录会进入重新配置流程，请按页面指引重新设置。")}
@@ -244,7 +251,7 @@ export default function SecurityPage() {
                       totpCount: factors.filter((factor) => factor.type === 'totp').length,
                       recoveryCodeCount: status.recoveryCodeCount,
                     })
-                  : t("尚未启用。启用后可在敏感操作前要求第二重验证。")}
+                  : status ? t("尚未启用。启用后可在敏感操作前要求第二重验证。") : t("尚未读取安全状态。")}
               </CardDescription>
             </CardHeader>
           </Card>
@@ -261,7 +268,7 @@ export default function SecurityPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {!totpSetup && (
-                  <Button variant="outline" size="sm" disabled={busy !== null} onClick={onBeginTotp}>
+                  <Button variant="outline" size="sm" disabled={busy !== null || paused || uncertain || reauthenticationNeeded} onClick={onBeginTotp}>
                     {busy === "totp-begin"
                       ? t("生成中…")
                       : hasTotp
@@ -289,6 +296,7 @@ export default function SecurityPage() {
                       <Label htmlFor="totp-code">{t("输入认证器 6 位验证码以确认")}</Label>
                       <Input
                         id="totp-code"
+                        disabled={busy !== null || paused}
                         inputMode="numeric"
                         autoComplete="one-time-code"
                         maxLength={6}
@@ -296,7 +304,7 @@ export default function SecurityPage() {
                         onChange={(event) => setTotpCode(event.target.value)}
                       />
                     </div>
-                    <Button size="sm" disabled={busy !== null || totpCode.length !== 6} onClick={onConfirmTotp}>
+                    <Button size="sm" disabled={busy !== null || paused || uncertain || reauthenticationNeeded || totpCode.length !== 6} onClick={onConfirmTotp}>
                       {busy === "totp-confirm" ? t("确认中…") : t("确认 TOTP")}
                     </Button>
                   </>
@@ -317,7 +325,7 @@ export default function SecurityPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={busy !== null}
+                  disabled={busy !== null || paused || uncertain || reauthenticationNeeded}
                   onClick={() =>
                     void guarded(
                       "recovery",
@@ -371,8 +379,10 @@ export default function SecurityPage() {
             </Card>
           </div>
 
-          <Dialog open={pendingGrant !== null} onOpenChange={(open) => !open && setPendingGrant(null)}>
-            <DialogContent>
+          <Dialog open={pendingGrant !== null && !paused && !reauthenticationNeeded} onOpenChange={(open) => !open && closeGrant()}>
+            {!paused && !reauthenticationNeeded && <DialogContent onCloseAutoFocus={event => {
+              if (meAuthLifecycle.paused()) event.preventDefault()
+            }}>
               <DialogHeader>
                 <DialogTitle>{grantDialogTitle()}</DialogTitle>
                 <DialogDescription>
@@ -386,6 +396,7 @@ export default function SecurityPage() {
                   <Label htmlFor="grant-totp-code">{t("输入认证器 6 位验证码")}</Label>
                   <Input
                     id="grant-totp-code"
+                    disabled={busy !== null || paused}
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     maxLength={6}
@@ -398,6 +409,7 @@ export default function SecurityPage() {
                     <Label htmlFor="grant-password">{t("当前密码")}</Label>
                     <Input
                       id="grant-password"
+                      disabled={busy !== null || paused}
                       type="password"
                       autoComplete="current-password"
                       value={grantPassword}
@@ -408,18 +420,18 @@ export default function SecurityPage() {
                 {grantError && <p role="alert" className="text-sm text-destructive">{grantError}</p>}
               </div>
               <DialogFooter>
-                <Button variant="outline" size="sm" onClick={() => setPendingGrant(null)}>
+                <Button variant="outline" size="sm" disabled={busy !== null || paused} onClick={closeGrant}>
                   {t("取消")}
                 </Button>
                 <Button
                   size="sm"
-                  disabled={grantCode.length !== 6 || (pendingGrant?.passwordRequired === true && grantPassword.length === 0)}
+                  disabled={busy !== null || paused || uncertain || reauthenticationNeeded || grantCode.length !== 6 || (pendingGrant?.passwordRequired === true && grantPassword.length === 0)}
                   onClick={() => void submitGrant()}
                 >
                   {t("验证并继续")}
                 </Button>
               </DialogFooter>
-            </DialogContent>
+            </DialogContent>}
           </Dialog>
         </>
       )}

@@ -1,10 +1,11 @@
-import { useMemo, type ReactNode } from "react"
+import { Fragment, useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
 import { useLocation } from "react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import AuthBoundary from "@/components/patterns/auth/AuthBoundary"
+import { useAuthState } from "@/components/patterns/auth/context"
 import type { AuthAdapter } from "@/components/patterns/auth/types"
 import { sessionApi, AuthResponseError, type Session } from "@/lib/auth"
-import { meAuthLifecycle, meAuthNavigation } from "@/lib/auth-lifecycle"
+import { bindMfaSubject, meAuthLifecycle, meAuthNavigation } from "@/lib/auth-lifecycle"
 
 /** One admission boundary outside the business shell; shared modules retain protected drafts. */
 export function SessionGate({children}: {children: ReactNode}) {
@@ -16,6 +17,7 @@ export function SessionGate({children}: {children: ReactNode}) {
       && JSON.stringify([...(current.roles ?? [])].sort()) === JSON.stringify([...(next.roles ?? [])].sort()),
     async logout() {await sessionApi.logout(); return {kind: "navigation"}},
     sessionChanged(session) {
+      bindMfaSubject(session?.subject)
       const previous = client.getQueryData<Session | null>(["session"])
       if (previous?.subject !== session?.subject) {
         void client.cancelQueries({predicate: query => query.queryKey[0] !== "session"})
@@ -27,6 +29,15 @@ export function SessionGate({children}: {children: ReactNode}) {
   return <AuthBoundary adapter={adapter} lifecycle={meAuthLifecycle} navigation={meAuthNavigation}
     target={"/me" + (location.pathname === "/" ? "/" : location.pathname) + location.search}
     revalidateOnResume brand={<img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain"/>}>
-    {children}
+    <AccountContent>{children}</AccountContent>
   </AuthBoundary>
+}
+
+/** Retain drafts while admission is paused; remount all local/portaled state for a new verified actor. */
+function AccountContent({children}: {children: ReactNode}) {
+  const {session} = useAuthState()
+  const owner = useRef<string | undefined>(undefined)
+  const subject = (session as Session | undefined)?.subject
+  useLayoutEffect(() => {if (subject) owner.current = subject}, [subject])
+  return <Fragment key={subject ?? owner.current}>{children}</Fragment>
 }

@@ -68,5 +68,10 @@
   "该操作需要验证当前认证器验证码，授权仅本次有效。": "This action requires a verification code from your authenticator. The authorization is valid for this action only.",
   "验证并继续": "Verify and continue",
   "取消": "Cancel",
-  "撤销最后一个可用因子会被服务端拒绝。": "Revoking the last available factor is rejected by the server."
+  "撤销最后一个可用因子会被服务端拒绝。": "Revoking the last available factor is rejected by the server.",
+  "尚未读取安全状态。": "The security state has not been loaded.",
+  "操作结果待核实。请先重新读取安全设置并核实结果，不要重复提交原操作。": "The operation result is uncertain. Reload the security settings and verify the outcome before submitting anything again.",
+  "重新读取安全设置": "Reload security settings",
+  "重新认证": "Sign in again",
+  "重新认证将离开当前页面。请先保留必要内容并核实待定操作结果；确认离开？": "Signing in again will leave this page. Keep any needed information and verify pending operation results first. Continue?"
 }

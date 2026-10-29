@@ -21,15 +21,16 @@ namespace PandaAuth.Me.Tests;
 public sealed class SsoSessionRuntimeTests
 {
     [Theory]
-    [InlineData("user", true, false)]
-    [InlineData("user", true, true)]
-    [InlineData("user", false, false)]
-    [InlineData("user", false, true)]
-    [InlineData(null, true, false)]
-    [InlineData(null, true, true)]
-    [InlineData(null, false, false)]
-    [InlineData(null, false, true)]
-    public async Task SharedLogout_RevokesLinkedSession_ButPreservesAnotherDevice(string? role, bool sharedLogoutEnabled, bool native)
+    [InlineData("user", true, false, false)]
+    [InlineData("user", true, true, false)]
+    [InlineData("user", false, false, false)]
+    [InlineData("user", false, true, false)]
+    [InlineData(null, true, false, false)]
+    [InlineData(null, true, true, false)]
+    [InlineData(null, false, false, false)]
+    [InlineData(null, false, true, false)]
+    [InlineData("user", true, true, true)]
+    public async Task SharedLogout_RevokesLinkedSession_ButPreservesAnotherDevice(string? role, bool sharedLogoutEnabled, bool native, bool handoffFailure)
     {
         var state = new CentralState();
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -41,6 +42,10 @@ public sealed class SsoSessionRuntimeTests
             builder.UseSetting("Auth:Issuer", "https://idp.example.invalid/");
             builder.ConfigureServices(services =>
             {
+                services.AddOpenIddict().AddClient(configuration => configuration.AddEventHandler<OpenIddictClientEvents.ProcessSignOutContext>(descriptor => descriptor.UseInlineHandler(context => {
+                    if (handoffFailure) throw new InvalidOperationException("fixture-signout-failure");
+                    return default;
+                })));
                 services.AddHttpClient("session-state").ConfigurePrimaryHttpMessageHandler(() => new CentralHandler(state));
                 services.AddHttpClient(MeSessionValidator.ClientName).ConfigurePrimaryHttpMessageHandler(() => new CentralHandler(state));
                 services.AddHttpClient<TokenRevocationClient>().ConfigurePrimaryHttpMessageHandler(() => new CentralHandler(state));
@@ -114,7 +119,14 @@ public sealed class SsoSessionRuntimeTests
         if (native) request.Content = new FormUrlEncodedContent(new Dictionary<string,string> { ["__RequestVerificationToken"] = payload.GetProperty("token").GetString()! });
         else request.Headers.Add("X-XSRF-Token", payload.GetProperty("token").GetString());
         using var logout = await client.SendAsync(request);
-        Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
+        if (handoffFailure) {
+            Assert.Equal(HttpStatusCode.InternalServerError, logout.StatusCode);
+            Assert.Equal("text/html", logout.Content.Headers.ContentType?.MediaType);
+            var html = await logout.Content.ReadAsStringAsync();
+            Assert.Contains("退出未完成", html);
+            Assert.DoesNotContain("fixture-signout-failure", html);
+            Assert.Null(logout.Headers.Location);
+        } else Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
         var localProof = logout.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith(MeLogoutProof.CookieName + "=", StringComparison.Ordinal));
         Assert.Contains("secure", localProof, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("httponly", localProof, StringComparison.OrdinalIgnoreCase);
