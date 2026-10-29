@@ -3,12 +3,14 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, Route, Routes } from "react-router"
 import { I18nProvider } from "@/lib/i18n"
+import { i18nConfig } from "@/i18n/config"
 import { SessionGate } from "./SessionGate"
 
 const i18n = { defaultLocale: "zh-CN", locales: ["zh-CN"], dictionaries: { "zh-CN": { "会话服务异常，请刷新重试。": "会话服务异常，请刷新重试。", "重试": "重试" } } }
 
 afterEach(() => {
   sessionStorage.clear()
+  localStorage.setItem("panda.me.lang", "zh-CN")
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -57,4 +59,17 @@ it("keeps permission failures out of automatic login", async () => {
   expect(await screen.findByRole("heading", {name: "此账号没有访问权限"})).toBeInTheDocument()
   expect(screen.queryByRole("link", {name: "继续登录"})).not.toBeInTheDocument()
   expect(screen.queryByText("private account content")).not.toBeInTheDocument()
+})
+
+it("keeps the existing English preference on an unavailable session without mounting business", async () => {
+ localStorage.setItem("panda.me.lang", "en")
+ const fetch = vi.fn().mockResolvedValue(new Response(null, {status: 503}))
+ vi.stubGlobal("fetch", fetch)
+ const client = new QueryClient({defaultOptions: {queries: {retry: false}}})
+ render(<I18nProvider config={i18nConfig}><QueryClientProvider client={client}><MemoryRouter><SessionGate><p>private account content</p></SessionGate></MemoryRouter></QueryClientProvider></I18nProvider>)
+ expect(document.documentElement.lang).toBe("en")
+ expect(await screen.findByRole("heading", {name: "Unable to confirm sign-in"})).toBeInTheDocument()
+ expect(screen.getByRole("button", {name: "Retry"})).toBeInTheDocument()
+ expect(screen.queryByText("private account content")).not.toBeInTheDocument()
+ expect(fetch).toHaveBeenCalledOnce()
 })
