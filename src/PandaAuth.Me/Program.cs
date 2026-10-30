@@ -350,7 +350,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return Results.Content(
-            "<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>403</title>" +
+            "<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>PandaAuth 账户中心</title>" +
             "<body style=\"font-family:system-ui;padding:3rem\">租户入口与登录上下文不匹配。</body></html>",
             "text/html; charset=utf-8");
     }
