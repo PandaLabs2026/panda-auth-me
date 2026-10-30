@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import LoginPage from "./login"
 const start = vi.hoisted(() => vi.fn(() => false))
 vi.mock("@/lib/auth-lifecycle", () => ({meAuthNavigation: {start, home: "/me/", href: (target: string) => "/me/login?returnUrl=" + encodeURIComponent(target)}}))
-afterEach(() => {vi.clearAllMocks()})
+afterEach(() => {vi.clearAllMocks(); localStorage.setItem("panda.me.lang", "zh-CN")})
 function page(url: string) {render(<StrictMode><Providers initialEntries={[url]}><LoginPage /></Providers></StrictMode>)}
 it("attempts automatic login once and retains a usable manual continuation when blocked", async () => {
  page("/sign-in?returnUrl=%2Fme%2Fsecurity%3Ftab%3Dtotp")
@@ -19,5 +19,14 @@ it("attempts automatic login once and retains a usable manual continuation when 
 it("does not automatically replay cancelled or failed authentication", async () => {
  page("/sign-in?error=cancelled")
  expect(await screen.findByRole("heading", {name: "登录未完成"})).toBeInTheDocument()
+ expect(start).not.toHaveBeenCalled()
+})
+
+it("keeps the existing English preference on an incomplete login bridge", async () => {
+ localStorage.setItem("panda.me.lang", "en")
+ page("/sign-in?error=cancelled&returnUrl=%2Fme%2Fsecurity%3Ftab%3Dtotp")
+ expect(document.documentElement.lang).toBe("en")
+ expect(await screen.findByRole("heading", {name: "Sign-in not completed"})).toBeInTheDocument()
+ expect(screen.getByRole("link", {name: "Continue to sign in"})).toHaveAttribute("href", "/me/login?returnUrl=%2Fme%2Fsecurity%3Ftab%3Dtotp")
  expect(start).not.toHaveBeenCalled()
 })
