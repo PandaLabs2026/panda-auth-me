@@ -24,7 +24,7 @@ describe("AppShell wiring", () => {
     expect(logo).toHaveAttribute("src", "/me/pandaauth-logo-horizontal.png")
     expect(logo).toHaveClass("h-9", "w-auto", "object-contain")
     // 导航:账户中心两页。
-    expect(screen.getByText("账户总览")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "账户总览" })).toBeInTheDocument()
     expect(screen.getByText("安全设置")).toBeInTheDocument()
     // 顶栏常驻件:返回来源应用(会话 appHomeUrl)。
     expect(screen.getByText("返回应用")).toHaveAttribute("href", "https://appliket.example/")
