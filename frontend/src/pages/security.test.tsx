@@ -57,12 +57,20 @@ const totpUserState = (): Array<[string, () => Response | Promise<Response>]> =>
 afterEach(() => {
   cleanup()
   sessionStorage.clear()
+  localStorage.setItem("panda.me.lang", "zh-CN")
   meAuthLifecycle.pause(false)
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe("SecurityPage", () => {
+  it("shows the TOTP revocation explanation in English", async () => {
+    localStorage.setItem("panda.me.lang", "en")
+    routeFetch(totpUserState())
+    render(<Providers><SecurityPage /></Providers>)
+    expect(await screen.findByText("Revoking TOTP requires the current verification code and password; the last TOTP authenticator cannot be revoked (use “Replace TOTP” instead).")).toBeInTheDocument()
+  })
+
   it("shows malformed identity responses as unavailable without declaring an expired session", async () => {
     routeFetch([
       ["/account/mfa/user/status", () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } })],
