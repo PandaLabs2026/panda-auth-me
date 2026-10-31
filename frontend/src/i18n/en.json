@@ -1,4 +1,6 @@
 {
+  "撤销 TOTP": "Revoke TOTP",
+  "撤销 TOTP 需验证当前验证码与登录密码；最后一个 TOTP 不可撤销（请使用「更换 TOTP」）。": "Revoking TOTP requires the current verification code and password; the last TOTP authenticator cannot be revoked (use “Replace TOTP” instead).",
   "导航": "Navigation",
   "正在加载身份": "Loading your identity",
   "会话服务异常，请刷新重试。": "Session service error. Please refresh and try again.",
