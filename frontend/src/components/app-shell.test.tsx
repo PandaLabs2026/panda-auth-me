@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/router"
@@ -8,10 +9,20 @@ import { Providers, } from "@/test/utils"
 
 afterEach(() => {
   cleanup()
+  localStorage.setItem("panda.me.lang", "zh-CN")
   vi.restoreAllMocks()
 })
 
 describe("AppShell wiring", () => {
+  it("updates the sidebar group label when the language changes", async () => {
+    const user = userEvent.setup()
+    render(<Providers><AppShell /></Providers>)
+    expect(screen.getByText("导航")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "切换语言" }))
+    expect(screen.getByText("Navigation")).toBeInTheDocument()
+    expect(screen.queryByText("导航")).not.toBeInTheDocument()
+  })
+
   it("renders PandaAuth brand, account-center nav items and the app-home header action", () => {
     render(
       <Providers>

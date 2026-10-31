@@ -14,6 +14,8 @@ The frontend is based on [panda-webapp-template](https://github.com/PandaLabs202
 
 Template alignment (v0.6.18, `537cf18dad30aa499ad27ecfbcca16f950db4eeb`): the sidebar, NavUser, MetricCard and DataTable follow the published template, including 220px desktop width and 2px menu spacing. Shared auth files are synchronized through the registered auth pipeline; `auth-ui-source.json` records their exact source. AppLayout retains product branding and BFF logout error handling, omits the template-version footer, and uses the current navigation title. Profile and MFA/security flows retain their established page and authorization interactions; they do not contain a suitable separate object-detail workflow.
 
+The product-adapted AppLayout incorporates the `navigationLabel` contract from template v0.6.19 (`59e6dcbae38d56deb016ecf2c57e3a08719f6ceb`); AppShell supplies the localized label while the existing product adaptations remain in place.
+
 ## Current implementation and limitations
 
 The [backend](src/PandaAuth.Me/Program.cs) contains OIDC challenge/callback, local Cookie, session, antiforgery logout and health entry points. The [frontend](frontend/src/pages/profile.tsx) includes an identity overview, and the [security settings page](frontend/src/pages/security.tsx) lets users self-manage TOTP and recovery codes (same-origin calls to the IDP's `/account/mfa/user/*` with IDP antiforgery tokens; Passkey was retired in AUTH-DELIVERY-002 — sensitive actions now require single-use TOTP+password operation grants). Login history, devices, grants and password changes remain placeholders or plans.
