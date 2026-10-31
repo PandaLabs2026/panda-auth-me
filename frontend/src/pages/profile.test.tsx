@@ -6,9 +6,17 @@ import { Providers } from "@/test/utils"
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  localStorage.setItem("panda.me.lang", "zh-CN")
 })
 
 describe("ProfilePage", () => {
+  it("translates the security settings description in English", async () => {
+    localStorage.setItem("panda.me.lang", "en")
+    render(<Providers><ProfilePage /></Providers>)
+    expect(await screen.findByText("TOTP and recovery code management")).toBeInTheDocument()
+    expect(screen.queryByText("TOTP 与恢复码管理")).not.toBeInTheDocument()
+  })
+
   it("renders the identity card and self-service entries from the session", async () => {
     vi.stubGlobal("fetch", vi.fn((path: string) => {
       if (path === "/me/api/session") {
