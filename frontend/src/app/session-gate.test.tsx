@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, Route, Routes } from "react-router"
 import { I18nProvider } from "@/lib/i18n"
 import { i18nConfig } from "@/i18n/config"
 import { SessionGate } from "./SessionGate"
+import { meAuthNavigation } from "@/lib/auth-lifecycle"
 
 const i18n = { defaultLocale: "zh-CN", locales: ["zh-CN"], dictionaries: { "zh-CN": { "会话服务异常，请刷新重试。": "会话服务异常，请刷新重试。", "重试": "重试" } } }
 
@@ -16,6 +17,27 @@ afterEach(() => {
 })
 
 describe("SessionGate", () => {
+describe("SessionGate quiet recovery", () => {
+  it("presents the quiet stage text on anonymous recovery and challenges exactly once", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 401 }))))
+    const start = vi.spyOn(meAuthNavigation, "start").mockReturnValue(true)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <I18nProvider config={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={["/protected"]}>
+            <SessionGate><p>受保护页面</p></SessionGate>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </I18nProvider>,
+    )
+    await waitFor(() => expect(start).toHaveBeenCalledOnce())
+    // quiet 呈现:无恢复卡,仅可访问的阶段文字
+    expect(screen.getByText("正在前往认证…")).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "正在前往登录…" })).not.toBeInTheDocument()
+  })
+})
+
   it("keeps the protected route in an error state when session lookup returns 5xx", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 503 }))))
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
