@@ -7,6 +7,7 @@
   "普通用户": "Standard user",
   "身份标识：": "Subject (identity): ",
   "安全设置": "Security settings",
+  "TOTP 与恢复码管理": "TOTP and recovery code management",
   "Passkey / TOTP / 恢复码管理": "TOTP and recovery codes management",
   "打开安全设置": "Open security settings",
   "登录记录": "Sign-in history",
