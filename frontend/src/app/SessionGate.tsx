@@ -15,6 +15,8 @@ export function SessionGate({children}: {children: ReactNode}) {
   const adapter = useMemo<AuthAdapter<Session>>(() => ({
     session: signal => sessionApi.me(signal),
     status: error => error instanceof AuthResponseError ? error.status : 0,
+    // subject + roles(集合比较,投影顺序不稳定不重挂)判定同会话;其余载荷
+    // (邮箱/昵称/MFA 状态)漂移视为身份变化,作废重挂。
     sameSession: (current, next) => current.subject === next.subject
       && JSON.stringify([...(current.roles ?? [])].sort()) === JSON.stringify([...(next.roles ?? [])].sort()),
     async logout() {await sessionApi.logout(); return {kind: "navigation"}},
@@ -30,7 +32,7 @@ export function SessionGate({children}: {children: ReactNode}) {
   }), [client])
   return <AuthBoundary translate={t} adapter={adapter} lifecycle={meAuthLifecycle} navigation={meAuthNavigation}
     target={"/me" + (location.pathname === "/" ? "/" : location.pathname) + location.search}
-    revalidateOnResume brand={<img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain"/>}>
+    revalidateOnResume recoveryPresentation="quiet" brand={<img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain"/>}>
     <AccountContent>{children}</AccountContent>
   </AuthBoundary>
 }
