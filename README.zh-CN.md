@@ -10,7 +10,9 @@
 
 PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 与 React 19 前端组成。引用同级 [panda-auth-share](https://github.com/PandaLabs2026/panda-auth-share)，作为 Server 的第一方客户端 `me-web`，生产路径为 `/me`，监听 127.0.0.1:9007。
 
-前端基于 [panda-webapp-template](https://github.com/PandaLabs2026/panda-webapp-template) **v0.5.2**（2026-10-16 对齐批次）：模板正典件（`ui/`、`patterns/`、`lib/i18n|notify`、`hooks/`、`typeset.css`）零改动拷贝，应用渲染在模板 AppLayout 内（侧栏导航 账户总览/安全设置、NavUser 承载 BFF 登出、命令面板、RequireAuth、403/500/404 错误页、阅读宽度 `contentClassName`）。应用身份留在令牌层（PandaAuth 钢蓝主题、`index.html` 默认浅色）与两个 API 面：`/me/api/*`（会话/防伪/登出，`X-XSRF-Token`）在 `lib/auth.ts`，IDP `/account/mfa/user/*` 同源直连客户端在 `lib/mfa-api.ts`（`RequestVerificationToken`）。危险 MFA 操作（撤销因子/重生成恢复码）统一走 ConfirmAction + 全局 notify；step-up 提示保持页内常驻（5 分钟窗口语境需持续可见）。本应用**就是** IDP `/me` 账户入口契约的本体，自身会话的 `accountEntryUrl` 恒空。
+前端基于 [panda-webapp-template](https://github.com/PandaLabs2026/panda-webapp-template)（v0.5.2 首采，2026-10-16）：模板正典件（`ui/`、`patterns/`、`lib/i18n|notify`、`hooks/`、`typeset.css`）零改动拷贝，应用渲染在模板 AppLayout 内（侧栏导航 账户总览/安全设置、NavUser 承载 BFF 登出、命令面板、`SessionGate` 组合正典 `auth/AuthBoundary`、403/500/404 错误页、阅读宽度 `contentClassName`）。应用身份留在令牌层（PandaAuth 钢蓝主题、`index.html` 默认浅色）与两个 API 面：`/me/api/*`（会话/防伪/登出，`X-XSRF-Token`）在 `lib/auth.ts`，IDP `/account/mfa/user/*` 同源直连客户端在 `lib/mfa-api.ts`（`RequestVerificationToken`）。敏感 MFA 操作由 `security.tsx` 自建确认对话框 + 全局 notify；step-up 提示保持页内常驻（5 分钟窗口语境需持续可见）。本应用**就是** IDP `/me` 账户入口契约的本体，自身会话的 `accountEntryUrl` 恒空。
+
+模板对齐（v0.6.20，`c8e265e10ada01808837ab503f4ce5d070fa5e43`）：经模板官方管线应用两个登记同步项——`auth-ui-source.json`（auth-experience，自 v0.6.18 起）与 `app-shell-ui-source.json`（app-shell：AppLayout/NavUser/sidebar/DataTable/MetricCard/PageHeader/ErrorBoundary/DataState/CommandPalette 字节正典，并新增 ContextPanel+guard，含 220px 桌面宽度与 2px 菜单间距）。AppLayout 为字节正典：品牌走 `brand` 插槽、侧栏分组标题走原生 `navigationLabel` 契约、模板版本页脚保持关闭（showcase 专用 opt-in）。BFF 登出失败提示移入应用自有 `useLogout`（`lib/auth.ts`），正典裸 `logout.mutate()` 调用保留失败反馈。个人资料与 MFA/安全流程沿用既有页面与授权交互；不含合适的独立对象详情工作流。
 
 ## 当前实现与限制
 
