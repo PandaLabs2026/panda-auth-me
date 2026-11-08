@@ -15,7 +15,7 @@ import { notify } from "@/lib/notify"
 /**
  * 路由(模板 v0.5.0 形态):/login 为桥接页(立即整页跳 BFF /me/login 走 OIDC 挑战),
  * 其余挂在 AppLayout(侧栏+固定顶栏)与 RequireAuth 守卫之下;403/500/404 错误页入册。
- * 账户中心是阅读宽度应用:AppLayout 内容区应用级收窄 max-w-4xl(v0.4.3 旋钮)。
+ * 内容区沿用 Template 默认全宽布局。
  */
 
 const ProfilePage = lazy(() => import("@/pages/profile"))
@@ -50,7 +50,6 @@ export function AppShell() {
       brand={
         <img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain object-left" />
       }
-      contentClassName="max-w-4xl mx-auto"
       headerActions={<HeaderActions />}
       commandActions={[
         {

@@ -112,5 +112,7 @@
   "退出将丢失未保存内容或待核实的操作信息。确认退出？": "Signing out will discard unsaved content or details of operations with an uncertain outcome. Sign out?",
   "未保存的表单": "an unsaved form",
   "进行中的账户安全操作": "an account security operation in progress",
-  "结果待核实的账户安全操作": "an account security operation with an uncertain outcome"
+  "结果待核实的账户安全操作": "an account security operation with an uncertain outcome",
+  "未设置名称": "Name not set",
+  "邮箱暂不可用": "Email unavailable"
 }

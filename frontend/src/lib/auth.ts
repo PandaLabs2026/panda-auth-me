@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useAuthState } from "@/components/patterns/auth/context"
 import { meAuthLifecycle } from "@/lib/auth-lifecycle"
@@ -83,7 +84,7 @@ export const sessionApi = {
         const raw: unknown = await res.json()
         if (!isBffSession(raw)) throw new Error("会话响应格式无效")
         return {
-          displayName: raw.nickname ?? raw.name ?? raw.subject,
+          displayName: raw.nickname?.trim() || raw.name?.trim() || "",
           email: raw.email ?? undefined,
           roles: raw.roles,
           accountEntryUrl: null,
@@ -124,9 +125,12 @@ export const sessionApi = {
 }
 
 /** 会话查询：无会话=null（守卫据此跳登录），Query 缓存单飞。 */
+export const MissingNameContext = createContext("")
+
 export function useSession() {
   const auth = useAuthState()
-  return useQuery({ enabled: !auth.lifecycle, queryKey: ["session"], queryFn: ({ signal }) => sessionApi.me(signal), staleTime: 60_000, retry: false })
+  const missingName = useContext(MissingNameContext)
+  return useQuery({ enabled: !auth.lifecycle, queryKey: ["session"], queryFn: ({ signal }) => sessionApi.me(signal), staleTime: 60_000, retry: false, select: data => data ? { ...data, displayName: data.displayName || missingName } : data })
 }
 
 export function useLogout() {

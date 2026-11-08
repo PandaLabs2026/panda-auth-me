@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import AuthBoundary from "@/components/patterns/auth/AuthBoundary"
 import { useAuthState } from "@/components/patterns/auth/context"
 import type { AuthAdapter } from "@/components/patterns/auth/types"
-import { sessionApi, AuthResponseError, type Session } from "@/lib/auth"
+import { sessionApi, AuthResponseError, MissingNameContext, type Session } from "@/lib/auth"
 import { bindMfaSubject, meAuthLifecycle, meAuthNavigation } from "@/lib/auth-lifecycle"
 
 /** One admission boundary outside the business shell; shared modules retain protected drafts. */
@@ -33,7 +33,7 @@ export function SessionGate({children}: {children: ReactNode}) {
   return <AuthBoundary translate={t} adapter={adapter} lifecycle={meAuthLifecycle} navigation={meAuthNavigation}
     target={"/me" + (location.pathname === "/" ? "/" : location.pathname) + location.search}
     revalidateOnResume recoveryPresentation="quiet" brand={<img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain"/>}>
-    <AccountContent>{children}</AccountContent>
+    <MissingNameContext.Provider value={t("未设置名称")}><AccountContent>{children}</AccountContent></MissingNameContext.Provider>
   </AuthBoundary>
 }
 
