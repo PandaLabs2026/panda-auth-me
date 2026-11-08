@@ -57,6 +57,29 @@ public sealed class SessionStatusValidationTests
     }
 
     [Fact]
+    public async Task ConcurrentSessionRequests_ProjectTheirOwnValidatedSubjects()
+    {
+        using var factory = Factory(new State("two-users"));
+        using var alice = Client(factory);
+        using var bob = Client(factory);
+        alice.DefaultRequestHeaders.Add("Cookie", Cookie(factory, "two-users", "alice", "alice-access"));
+        bob.DefaultRequestHeaders.Add("Cookie", Cookie(factory, "two-users", "bob", "bob-access"));
+
+        var responses = await Task.WhenAll(alice.GetAsync("/me/api/session"), bob.GetAsync("/me/api/session"));
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK, responses[0].StatusCode);
+            Assert.Equal(HttpStatusCode.OK, responses[1].StatusCode);
+            Assert.Equal("alice", (await responses[0].Content.ReadFromJsonAsync<JsonElement>()).GetProperty("subject").GetString());
+            Assert.Equal("bob", (await responses[1].Content.ReadFromJsonAsync<JsonElement>()).GetProperty("subject").GetString());
+        }
+        finally
+        {
+            foreach (var response in responses) response.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task ConcurrentOldTickets_RefreshOnlyOnce()
     {
         var state = new State("expired");
@@ -97,14 +120,14 @@ public sealed class SessionStatusValidationTests
                 services.ConfigureAll<HttpClientFactoryOptions>(options => options.HttpMessageHandlerBuilderActions.Add(http => http.PrimaryHandler = new Handler(state)));
             });
         });
-    private static string Cookie(WebApplicationFactory<Program> factory, string mode)
+    private static string Cookie(WebApplicationFactory<Program> factory, string mode, string subject = "fixture-user", string? accessToken = null)
     {
         var properties = new AuthenticationProperties { IssuedUtc = DateTimeOffset.UtcNow, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(1) };
         var tokens = new List<AuthenticationToken> { new() { Name = SessionTokens.RefreshTokenName, Value = "fixture-refresh" } };
-        if (mode != "legacy") tokens.Add(new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = mode is "valid" or "unavailable" or "subject-mismatch" ? "valid-access" : "expired-access" });
+        if (mode != "legacy") tokens.Add(new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = accessToken ?? (mode is "valid" or "unavailable" or "subject-mismatch" or "two-users" ? "valid-access" : "expired-access") });
         properties.StoreTokens(tokens);
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
-            new Claim("sub", "fixture-user"), new Claim(MeSessionLifecycle.SessionIdClaimType, Guid.NewGuid().ToString("N")),
+            new Claim("sub", subject), new Claim(MeSessionLifecycle.SessionIdClaimType, Guid.NewGuid().ToString("N")),
             new Claim(MeSessionLifecycle.StartedAtClaimType, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
             new Claim(PandaAuthClaims.SsoSessionId, Guid.NewGuid().ToString("N")),
         ], "Cookies"));
@@ -141,6 +164,12 @@ public sealed class SessionStatusValidationTests
                 Interlocked.Increment(ref state.UserinfoCalls);
                 if (state.Mode == "unavailable") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
                 if (state.Mode == "subject-mismatch" && request.Headers.Authorization?.Parameter == "valid-access") return Json("{\"sub\":\"another-user\"}");
+                if (state.Mode == "two-users") return Json(request.Headers.Authorization?.Parameter switch
+                {
+                    "alice-access" => "{\"sub\":\"alice\"}",
+                    "bob-access" => "{\"sub\":\"bob\"}",
+                    _ => "{}",
+                });
                 return request.Headers.Authorization?.Parameter == "valid-access" ? Json("{\"sub\":\"fixture-user\"}") : Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
             }
             return Json(JsonSerializer.Serialize(new { revoked = state.Revoked }));
