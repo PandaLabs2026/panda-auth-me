@@ -24,6 +24,7 @@ public sealed class SessionStatusValidationTests
     [InlineData("legacy", HttpStatusCode.OK, 1, 1)]
     [InlineData("revoked", HttpStatusCode.Unauthorized, 1, 1)]
     [InlineData("unavailable", HttpStatusCode.ServiceUnavailable, 1, 0)]
+    [InlineData("subject-mismatch", HttpStatusCode.Unauthorized, 2, 1)]
     public async Task Session_UsesIdpCredentialsAndPreservesRefreshCompatibility(string mode, HttpStatusCode expected, int userinfoCalls, int refreshCalls)
     {
         var state = new State(mode);
@@ -41,6 +42,18 @@ public sealed class SessionStatusValidationTests
             Assert.Contains(response.Headers.GetValues("Set-Cookie"), Deleted);
         else if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
             Assert.DoesNotContain(cookies, Deleted);
+    }
+
+    [Fact]
+    public async Task AnonymousSessionRequest_IsUnauthorized()
+    {
+        using var factory = Factory(new State("valid"));
+        using var client = Client(factory);
+
+        using var response = await client.GetAsync("/me/api/session");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Null(response.Headers.Location);
     }
 
     [Fact]
@@ -88,7 +101,7 @@ public sealed class SessionStatusValidationTests
     {
         var properties = new AuthenticationProperties { IssuedUtc = DateTimeOffset.UtcNow, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(1) };
         var tokens = new List<AuthenticationToken> { new() { Name = SessionTokens.RefreshTokenName, Value = "fixture-refresh" } };
-        if (mode != "legacy") tokens.Add(new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = mode == "valid" || mode == "unavailable" ? "valid-access" : "expired-access" });
+        if (mode != "legacy") tokens.Add(new AuthenticationToken { Name = SessionTokens.AccessTokenName, Value = mode is "valid" or "unavailable" or "subject-mismatch" ? "valid-access" : "expired-access" });
         properties.StoreTokens(tokens);
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim("sub", "fixture-user"), new Claim(MeSessionLifecycle.SessionIdClaimType, Guid.NewGuid().ToString("N")),
@@ -127,6 +140,7 @@ public sealed class SessionStatusValidationTests
             {
                 Interlocked.Increment(ref state.UserinfoCalls);
                 if (state.Mode == "unavailable") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                if (state.Mode == "subject-mismatch" && request.Headers.Authorization?.Parameter == "valid-access") return Json("{\"sub\":\"another-user\"}");
                 return request.Headers.Authorization?.Parameter == "valid-access" ? Json("{\"sub\":\"fixture-user\"}") : Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
             }
             return Json(JsonSerializer.Serialize(new { revoked = state.Revoked }));
