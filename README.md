@@ -39,7 +39,7 @@ Source build entry points (not proof of a working OIDC login):
 ```bash
 dotnet build PandaAuth.Me.slnx
 cd frontend
-npm ci
+npm run deps:ci
 npm run build
 ```
 
@@ -78,3 +78,5 @@ The default production bridge stack must set both `PANDA_AUTH_TENANT_NETWORK_MOD
 and `PANDA_AUTH_TRUSTED_PROXY` to the allocation's exact IPv4 gateway. Same-subnet peers and
 loopback cannot supply trusted forwarded headers in bridge mode. Production ports and release
 commands are maintained in the sibling meta repository's `deploy/README.md`.
+
+Dependency updates use `npm run deps:install`. Both `deps:ci` and `deps:install` run capacity preflight before invoking npm.
