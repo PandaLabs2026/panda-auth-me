@@ -28,6 +28,7 @@ export interface Session {
   subject?: string
   appHomeUrl?: string | null
   appHomeLabel?: string | null
+  profileEditingEnabled?: boolean
 }
 
 /** BFF 会话契约（camelCase，对应 Program.cs 的会话端点）。 */
@@ -39,6 +40,7 @@ type BffSession = {
   roles: string[]
   appHomeUrl: string | null
   appHomeLabel?: string | null
+  profileEditingEnabled?: boolean
 }
 
 function isBffSession(value: unknown): value is BffSession {
@@ -91,6 +93,7 @@ export const sessionApi = {
           subject: raw.subject,
           appHomeUrl: raw.appHomeUrl,
           appHomeLabel: raw.appHomeLabel,
+          profileEditingEnabled: raw.profileEditingEnabled === true,
         }
       },
       10_000,

@@ -33,6 +33,7 @@ public static class BrowserEntry
             builder.UseSetting("Auth:ClientId", "me-web");
             builder.UseSetting("Auth:ClientSecret", "browser-fixture-only");
             builder.UseSetting("Auth:SessionState:ClientSecret", "browser-fixture-session-only");
+            builder.UseSetting("Profile:Enabled", "true");
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureServices(services => {
                 services.AddDataProtection().UseEphemeralDataProtectionProvider();
@@ -42,6 +43,7 @@ public static class BrowserEntry
                     handler.ServerCertificateCustomValidationCallback = (message, cert, _, _) => message.RequestUri?.IsLoopback == true && cert?.GetCertHashString() == certificate.GetCertHashString();
                 }));
                 services.AddHttpClient("me-session-validation").ConfigurePrimaryHttpMessageHandler(Handler);
+                services.AddHttpClient("me-private-profile").ConfigurePrimaryHttpMessageHandler(Handler);
                 services.AddSingleton<IStartupFilter>(new FixtureMfaProxy(identity, certificate));
                 services.AddHttpClient<PandaAuth.Me.TokenRevocationClient>().ConfigurePrimaryHttpMessageHandler(Handler);
                 services.AddHttpClient("session-state").ConfigurePrimaryHttpMessageHandler(Handler);

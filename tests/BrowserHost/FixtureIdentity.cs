@@ -31,6 +31,10 @@ internal sealed class FixtureIdentity : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0, o => o.UseHttps(certificate)));
         app = builder.Build();
+        new FixtureProfile().Map(app, context => {
+            var value = context.Request.Headers.Authorization.ToString();
+            return value.StartsWith("Bearer ", StringComparison.Ordinal) && accessTokens.TryGetValue(value[7..], out var actor) ? actor.Subject : null;
+        }, () => Mode);
         app.MapGet("/.well-known/openid-configuration", () => Results.Json(new {
             issuer = Issuer, authorization_response_iss_parameter_supported = true, authorization_endpoint = Issuer + "connect/authorize", token_endpoint = Issuer + "connect/token",
             userinfo_endpoint = Issuer + "connect/userinfo", jwks_uri = Issuer + "jwks", end_session_endpoint = Issuer + "connect/logout", revocation_endpoint = Issuer + "connect/revoke",
@@ -86,7 +90,7 @@ internal sealed class FixtureIdentity : IAsyncDisposable
         app.MapGet("/fixture/evidence", () => Results.Json(new {kind = "synthetic-me-oidc-fixture", runId = RunId, authorizations, exchanges, pkceVerified = pkce, logouts, writes}));
         app.MapPost("/fixture/mode", (HttpContext context) => {
             var value = context.Request.Query["value"].ToString();
-            if (!new[] {"normal", "actor-b", "expired", "unavailable", "cancel", "mfa-expired", "revocation-unavailable", "signout-error"}.Contains(value)) return Results.BadRequest();
+            if (!new[] {"normal", "actor-b", "expired", "unavailable", "cancel", "mfa-expired", "revocation-unavailable", "signout-error", "profile-conflict"}.Contains(value)) return Results.BadRequest();
             mode = value; return Results.NoContent();
         });
         app.MapGet("/account/mfa/user/status", () => Mode == "mfa-expired" ? Results.Unauthorized() : Results.Json(new {hasActiveFactor = true, requiresReconfiguration = false, recoveryCodeCount = 10}));

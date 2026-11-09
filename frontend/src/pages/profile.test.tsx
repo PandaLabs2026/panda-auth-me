@@ -10,6 +10,11 @@ afterEach(() => {
 })
 
 describe("ProfilePage", () => {
+  it("offers profile editing only when the authenticated BFF session enables it", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ subject: "fixture", name: "Alice", email: null, roles: [], profileEditingEnabled: true }), { headers: { "content-type": "application/json" } })))
+    render(<Providers session="fetch"><ProfilePage /></Providers>)
+    expect(await screen.findByRole("link", { name: "编辑个人资料" })).toHaveAttribute("href", "/profile")
+  })
   it("translates the security settings description in English", async () => {
     localStorage.setItem("panda.me.lang", "en")
     render(<Providers><ProfilePage /></Providers>)

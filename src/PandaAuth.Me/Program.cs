@@ -143,6 +143,8 @@ if (!string.IsNullOrWhiteSpace(dataProtectionKeyPath))
 
 builder.Services.AddAuthorization();
 builder.Services.AddHealthChecks();
+builder.Services.AddHttpClient(MeProfileEndpoints.ClientName, client => client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
 // Revocations must remain visible across cookie validation and logout request scopes.
 builder.Services.AddSingleton<MeSessionLifecycle>();
 builder.Services.AddSingleton<MeLogoutProof>();
@@ -245,7 +247,7 @@ builder.Services.AddOpenIddict()
             .EnableErrorPassthrough();
 
         // 第一方客户端（me-web，机密 + PKCE），由 panda-auth-server 的 Seeder 预置。
-        options.AddRegistration(new OpenIddictClientRegistration
+        var registration = new OpenIddictClientRegistration
         {
             ProviderName = "pandaauth",
             Issuer = issuer,
@@ -265,7 +267,10 @@ builder.Services.AddOpenIddict()
             // post-logout 回调必须是专用路径：/me/ 本身会被 OpenIddict 客户端拦截做登出回调提取，
 // 无参数的普通导航也被当作无 state 的回调以 400 拒绝（2026-10-01 实测，t0000 同病）。
 PostLogoutRedirectUri = new Uri("me/callback/logout/pandaauth", UriKind.Relative),
-        });
+        };
+        if (builder.Configuration.GetValue<bool>("Profile:Enabled"))
+            registration.Scopes.UnionWith([ProfileScopes.Read, ProfileScopes.Write]);
+        options.AddRegistration(registration);
 
         options.AddEventHandler<OpenIddictClientEvents.ProcessChallengeContext>(descriptor =>
             descriptor.UseInlineHandler(context =>
@@ -350,7 +355,7 @@ app.MapGet("/me/callback/login/{provider}", async (HttpContext context) =>
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return Results.Content(
-            "<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>PandaAuth 账户中心</title>" +
+            $"<!doctype html><html lang=\"zh\"><meta charset=\"utf-8\"><title>{MeAuthPage.DocumentTitle}</title>" +
             "<body style=\"font-family:system-ui;padding:3rem\">租户入口与登录上下文不匹配。</body></html>",
             "text/html; charset=utf-8");
     }
@@ -507,6 +512,7 @@ app.MapGet("/me/api/session", async (HttpContext context, MeSessionValidator val
         roles = context.User.FindAll(Claims.Role).Select(claim => claim.Value).ToArray(),
         appHomeUrl = portalHomeUrl,
         appHomeLabel = portalHomeLabel.Length == 0 ? null : portalHomeLabel,
+        profileEditingEnabled = app.Configuration.GetValue<bool>("Profile:Enabled"),
     });
 });
 
@@ -517,6 +523,7 @@ app.MapGet("/me/api/antiforgery", (HttpContext context, IAntiforgery antiforgery
 });
 
 app.MapHealthChecks("/me/healthz");
+app.MapMeProfile(issuer);
 
 // SPA 回退：/me 下非文件路径一律返回 index.html。
 // SPA 入口 no-store：部署轮换后浏览器不得沿用旧前端（带哈希的静态资源仍可长缓存）。

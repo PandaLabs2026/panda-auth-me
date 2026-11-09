@@ -47,6 +47,7 @@ export default function ProfilePage() {
           </CardDescription>
         </CardHeader>
       </Card>
+      {s.profileEditingEnabled && <Button asChild variant="outline"><Link to="/profile">{t("编辑个人资料")}</Link></Button>}
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader>
