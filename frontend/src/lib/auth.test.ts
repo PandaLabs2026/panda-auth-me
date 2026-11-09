@@ -66,6 +66,16 @@ describe("session payload boundary", () => {
   })
   it("keeps a valid session and optional nullable fields", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({subject: "user", name: null, nickname: null, email: null, roles: [], appHomeUrl: null}), {headers: {"content-type": "application/json"}})))
-    await expect(sessionApi.me()).resolves.toMatchObject({subject: "user", displayName: "user", roles: []})
+    await expect(sessionApi.me()).resolves.toMatchObject({subject: "user", displayName: "", roles: []})
   })
 })
+
+ describe("profile name projection", () => {
+  it.each([
+    [" Nick ", "Name", "Nick"], [" ", " Name ", "Name"],
+    [null, "Name", "Name"], [null, null, ""], [" ", " ", ""],
+  ])("uses only nonblank descriptive names (%s, %s)", async (nickname, name, expected) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({subject: "internal-secret-id", name, nickname, email: null, roles: ["admin"]}), {headers: {"content-type": "application/json"}})))
+    await expect(sessionApi.me()).resolves.toMatchObject({subject: "internal-secret-id", displayName: expected, roles: ["admin"]})
+  })
+ })

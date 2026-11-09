@@ -35,7 +35,7 @@ describe("ProfilePage", () => {
 
     render(<Providers session="fetch"><ProfilePage /></Providers>)
 
-    // displayName 三级回退 name → nickname → subject;占位卡如实标注 Phase 2。
+    // Descriptive session names are shown; placeholders remain explicit.
     expect(await screen.findByText("张三")).toBeInTheDocument()
     expect(screen.getByText(/zhang@example\.com/)).toBeInTheDocument()
     expect(screen.getByText("登录记录")).toBeInTheDocument()
@@ -50,3 +50,12 @@ describe("ProfilePage", () => {
     expect(screen.getByRole("status")).toBeInTheDocument()
   })
 })
+
+ it.each([["zh-CN", "未设置名称", "邮箱暂不可用"], ["en", "Name not set", "Email unavailable"]])("minimizes the self profile in %s", async (locale, name, email) => {
+  localStorage.setItem("panda.me.lang", locale)
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({subject: "internal-secret-id", name: " ", nickname: null, email: null, roles: ["internal-admin-role"]}), {headers: {"content-type": "application/json"}})))
+  render(<Providers session="fetch"><ProfilePage /></Providers>)
+  expect(await screen.findByText(name)).toBeInTheDocument()
+  expect(screen.getByText(email)).toBeInTheDocument()
+  expect(screen.queryByText(/internal-secret-id|internal-admin-role|普通用户|未绑定邮箱/)).not.toBeInTheDocument()
+ })

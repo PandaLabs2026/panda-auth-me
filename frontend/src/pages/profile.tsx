@@ -41,14 +41,11 @@ export default function ProfilePage() {
       <PageHeader title={t("账户总览")} description={t("PandaAuth 账户的身份信息与自助入口。")} />
       <Card>
         <CardHeader>
-          <CardTitle>{s.displayName}</CardTitle>
+          <CardTitle>{s.displayName || t("未设置名称")}</CardTitle>
           <CardDescription>
-            {s.email ?? t("未绑定邮箱")} · {s.roles && s.roles.length > 0 ? s.roles.join("、") : t("普通用户")}
+            {s.email ?? t("邮箱暂不可用")}
           </CardDescription>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          {t("身份标识：")}<code className="rounded bg-muted px-1.5 py-0.5 text-xs">{s.subject}</code>
-        </CardContent>
       </Card>
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
