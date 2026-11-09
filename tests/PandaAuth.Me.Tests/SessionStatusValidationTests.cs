@@ -19,6 +19,86 @@ namespace PandaAuth.Me.Tests;
 public sealed class SessionStatusValidationTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionProjectsExplicitProfileAvailability(bool enabled)
+    {
+        using var factory = Factory(new State("valid")).WithWebHostBuilder(builder => builder.UseSetting("Profile:Enabled", enabled.ToString()));
+        using var client = Client(factory);
+        client.DefaultRequestHeaders.Add("Cookie", Cookie(factory, "valid"));
+        using var response = await client.GetAsync("/me/api/session");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(enabled, body.GetProperty("profileEditingEnabled").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("expired")]
+    public async Task ProfileReadUsesValidatedCurrentAccessToken(string mode)
+    {
+        var state = new State(mode);
+        using var factory = Factory(state).WithWebHostBuilder(builder => builder.UseSetting("Profile:Enabled", "true"));
+        using var client = Client(factory);
+        client.DefaultRequestHeaders.Add("Cookie", Cookie(factory, mode));
+        using var response = await client.GetAsync("/me/api/profile");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        Assert.Equal("valid-access", state.ProfileToken);
+        Assert.Equal("https://idp.example.invalid" + PandaAuthProfileApi.Self, state.ProfileUrl);
+        Assert.Equal(mode == "expired" ? 1 : 0, state.RefreshCalls);
+        Assert.Contains("fixture-profile", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ProfileWriteWithoutCsrfDoesNotReachProfileServer()
+    {
+        var state = new State("valid");
+        using var factory = Factory(state).WithWebHostBuilder(builder => builder.UseSetting("Profile:Enabled", "true"));
+        using var client = Client(factory);
+        client.DefaultRequestHeaders.Add("Cookie", Cookie(factory, "valid"));
+        using var response = await client.PatchAsync("/me/api/profile", new StringContent("{}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null(state.ProfileToken);
+    }
+
+    [Fact]
+    public async Task ProfilePatchForwardsRevisionWithRealAntiforgeryCookieAndHeader()
+    {
+        var state = new State("valid");
+        using var factory = Factory(state).WithWebHostBuilder(builder => builder.UseSetting("Profile:Enabled", "true"));
+        using var client = Client(factory);
+        var cookie = Cookie(factory, "valid");
+        client.DefaultRequestHeaders.Add("Cookie", cookie);
+        using var admission = await client.GetAsync("/me/api/antiforgery");
+        var csrf = (await admission.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+        var antiCookie = admission.Headers.GetValues("Set-Cookie").Single(value => value.Contains("Antiforgery", StringComparison.Ordinal)).Split(';')[0];
+        client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie", cookie + "; " + antiCookie);
+        using var request = new HttpRequestMessage(HttpMethod.Patch, "/me/api/profile")
+        { Content = new StringContent("{\"displayName\":\"fixture-profile\"}", Encoding.UTF8, "application/json") };
+        request.Headers.Add("X-XSRF-Token", csrf);
+        request.Headers.TryAddWithoutValidation("If-Match", "\"0\"");
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("\"0\"", state.ProfileRevision);
+        Assert.Equal("valid-access", state.ProfileToken);
+        Assert.True(response.Headers.CacheControl?.NoStore);
+    }
+
+    [Fact]
+    public async Task ProfileRejectsCallerSelectedIdentityBeforeAnyUpstreamRequest()
+    {
+        var state = new State("valid");
+        using var factory = Factory(state).WithWebHostBuilder(builder => builder.UseSetting("Profile:Enabled", "true"));
+        using var client = Client(factory);
+        client.DefaultRequestHeaders.Add("Cookie", Cookie(factory, "valid"));
+        using var response = await client.GetAsync("/me/api/profile?subject=another-account");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Null(state.ProfileToken);
+        Assert.Equal(0, state.UserinfoCalls);
+    }
+
+    [Theory]
     [InlineData("valid", HttpStatusCode.OK, 1, 0)]
     [InlineData("expired", HttpStatusCode.OK, 2, 1)]
     [InlineData("legacy", HttpStatusCode.OK, 1, 1)]
@@ -140,6 +220,9 @@ public sealed class SessionStatusValidationTests
         public int UserinfoCalls;
         public int RefreshCalls;
         public volatile bool Revoked;
+        public string? ProfileToken;
+        public string? ProfileUrl;
+        public string? ProfileRevision;
     }
     private sealed class Refresher(State state) : IMeSessionRefresher
     {
@@ -158,6 +241,13 @@ public sealed class SessionStatusValidationTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (path == PandaAuthProfileApi.Self)
+            {
+                state.ProfileToken = request.Headers.Authorization?.Parameter;
+                state.ProfileUrl = request.RequestUri.AbsoluteUri;
+                state.ProfileRevision = request.Headers.TryGetValues("If-Match", out var revisions) ? revisions.Single() : null;
+                return Json("{\"displayName\":\"fixture-profile\",\"biography\":null,\"hasAvatar\":false,\"contactEmail\":{\"address\":null,\"state\":\"none\"},\"revision\":\"\\\"0\\\"\"}");
+            }
             if (path == PandaAuthEndpoints.Token) return Json("{\"access_token\":\"fixture-machine\",\"expires_in\":300}");
             if (path == PandaAuthEndpoints.Userinfo)
             {

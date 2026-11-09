@@ -22,6 +22,12 @@ Default redirect URIs in the local [Auth configuration](src/PandaAuth.Me/appsett
 
 The [Dockerfile](Dockerfile) uses the **workspace root** as its build context (the project references sibling Share, so it is not a self-contained build from this repository's own context; context filtering comes from the sibling `Dockerfile.dockerignore`, and this repository's `.dockerignore` does not apply to a workspace-root context). The runtime stage starts as the non-root `app` user (uid 1654), carries an image-level `HEALTHCHECK`, and pre-creates plus `chown`s the DataProtection key directory (a missing or root-owned directory makes the application fail closed). That context has produced the me image actually running in production.
 
+## Private profile editor (opt-in)
+
+`/me/profile` edits the authenticated user's name, biography, avatar and independently verified contact email through `/me/api/profile`. Writes use BFF antiforgery and the Server revision; stale versions retain the draft for an explicit reread. Sign-in email, credentials, roles, organization audiences and public profiles have separate owners.
+
+Me `Profile:Enabled` defaults to false. Enabling it exposes the entry and requests delegated `profile.read`/`profile.write` on a fresh sign-in; Server schema, private profile API and explicit Me client registration must be prepared first. Follow the [owning profile contract](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/contracts/self-profile-v1.md) and [Auth #322](https://github.com/PandaLabs2026/panda-auth/issues/322) for t0000/Fleet release and acceptance preparation. Source tests and synthetic browser fixtures do not grant production activation.
+
 ## Prerequisites, build and run entry points
 
 Use the .NET SDK selected by [global.json](global.json) (currently 10.0.112 with latestFeature roll-forward). This repository can be built without the private coordination repository, but the public Share repository must be cloned beside it. Commands below run from this repository root.

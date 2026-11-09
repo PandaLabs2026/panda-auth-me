@@ -4,6 +4,7 @@ namespace PandaAuth.Me;
 /// <summary>Script-free branded authentication status document; all variable text is encoded.</summary>
 public static class MeAuthPage
 {
+    public const string DocumentTitle = "PandaAuth 账户中心 | Panda Labs";
     public static string Render(string title, IEnumerable<string> messages, bool returnToAccount, string? businessReturn = null, string? actionLabel = null)
     {
         var paragraphs = string.Concat(messages.Select(message => "<p>" + WebUtility.HtmlEncode(message) + "</p>"));
@@ -13,7 +14,7 @@ public static class MeAuthPage
         var action = actionLabel ?? (returnToAccount ? "返回账户中心" : "继续登录");
         return $$"""
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer"><title>PandaAuth 账户中心</title>
+<meta name="referrer" content="no-referrer"><title>{{DocumentTitle}}</title>
 <style>
 :root{color-scheme:light;font-family:system-ui,sans-serif;background:#f7f8fa;color:#20262e}
 *{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:clamp(1rem,5vw,4rem)}main{width:100%;max-width:24rem;margin:0;background:white;border:1px solid #dce1e6;border-radius:1rem;padding:clamp(1.25rem,5vw,2.5rem);overflow-wrap:anywhere}

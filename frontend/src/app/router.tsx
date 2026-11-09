@@ -20,6 +20,7 @@ import { notify } from "@/lib/notify"
 
 const ProfilePage = lazy(() => import("@/pages/profile"))
 const SecurityPage = lazy(() => import("@/pages/security"))
+const ProfileEditPage = lazy(() => import("@/pages/profile-edit"))
 
 function PageFallback() {
   const { t } = useI18n()
@@ -98,6 +99,7 @@ export const router = createBrowserRouter(
       children: [
         { index: true, element: page(<ProfilePage />) },
         { path: "security", element: page(<SecurityPage />) },
+        { path: "profile", element: page(<ProfileEditPage />) },
         { path: "403", element: <ForbiddenPage /> },
         { path: "500", element: <ServerErrorPage /> },
       ],

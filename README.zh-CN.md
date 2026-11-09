@@ -22,6 +22,12 @@ PandaAuth 终端用户账户中心，由 .NET 10 BFF、OpenIddict.Client 7.7.0 �
 
 [Dockerfile](Dockerfile)以**工作区根目录**为构建上下文（项目依赖同级 Share，所以它不是「本仓上下文的自包含构建」；上下文过滤走同目录的 `Dockerfile.dockerignore`，本仓的 `.dockerignore` 对根上下文不生效）。运行阶段以非 root 的 `app` 用户（uid 1654）启动、带镜像级 `HEALTHCHECK`，并在镜像内预建、`chown` 了 DataProtection 密钥目录（该目录缺失或属 root 时应用会失败关闭）。该上下文已在生产构建出实际运行的 me 镜像。
 
+## 私有资料编辑（显式开启）
+
+`/me/profile` 通过 `/me/api/profile` 编辑当前用户的名称、简介、头像和独立验证的联系邮箱。写操作使用 BFF 防伪令牌及 Server revision；版本冲突保留草稿，由用户重新读取后确认。登录邮箱、凭据、角色、组织受众和公开资料各有独立拥有方。
+
+Me 的 `Profile:Enabled` 默认关闭。开启后展示入口，并在新的登录中请求委托 `profile.read`/`profile.write`；须先准备 Server schema、私有资料 API 及明确的 Me 客户端登记。t0000/Fleet 发布与验收准备以[拥有方资料契约](https://github.com/PandaLabs2026/panda-auth/blob/main/docs/contracts/self-profile-v1.md)及 [Auth #322](https://github.com/PandaLabs2026/panda-auth/issues/322) 为准。源码测试及合成浏览器夹具不授予生产启用权限。
+
 ## 前置条件与构建运行
 
 需要 .NET SDK，版本选择见本仓 [global.json](global.json)（当前请求 10.0.112，允许 latestFeature roll-forward）。本仓可脱离私有元仓构建，但需将公开 Share 仓同级克隆。以下命令在本仓根目录执行。

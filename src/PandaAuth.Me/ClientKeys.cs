@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.IdentityModel.Tokens;
@@ -52,7 +53,12 @@ public static class ClientKeys
                 JsonSerializer.Serialize(stream, document, JsonOptions);
                 stream.Flush(flushToDisk: true);
             }
-            try { File.Move(temporary, path, overwrite: false); }
+            try
+            {
+                if (OperatingSystem.IsWindows()) File.Move(temporary, path, overwrite: false);
+                else if (Link(temporary, path) != 0)
+                    throw new IOException("客户端密钥文件首次发布失败。", new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+            }
             catch (IOException) when (File.Exists(path))
             {
                 // A concurrent creator won. Read its complete file, never overwrite it.
@@ -65,6 +71,11 @@ public static class ClientKeys
             if (File.Exists(temporary)) File.Delete(temporary);
         }
     }
+
+    // POSIX link publishes the completed inode only if the destination is absent.
+    // File.Move(overwrite:false) can use a check-then-rename fast path on Unix.
+    [DllImport("libc", EntryPoint = "link", SetLastError = true, CharSet = CharSet.Ansi)]
+    private static extern int Link(string existing, string destination);
 
     private static (EncryptingCredentials Encryption, SigningCredentials Signing) Read(string path)
     {
