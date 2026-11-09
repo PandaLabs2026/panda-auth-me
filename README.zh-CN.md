@@ -39,7 +39,7 @@ cd panda-auth-me
 ```bash
 dotnet build PandaAuth.Me.slnx
 cd frontend
-npm ci
+npm run deps:ci
 npm run build
 ```
 
