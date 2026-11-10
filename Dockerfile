@@ -36,7 +36,8 @@ RUN dotnet publish panda-auth-me/src/PandaAuth.Me -c Release -o /app --no-restor
 # ================= 运行阶段 =================
 # .NET/ASP.NET安全补丁10.0.14；与Server共用已核验的不可变运行时基线。
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.14@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c AS runtime
-RUN apt-get -o Acquire::Retries=0 update \
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get -o Acquire::Retries=0 -o Acquire::https::Timeout=30 update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends --only-upgrade apt=2.8.4ubuntu0.1 libapt-pkg6.0t64=2.8.4ubuntu0.1 \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
