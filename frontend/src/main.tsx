@@ -8,6 +8,10 @@ import ErrorBoundary from "@/components/patterns/ErrorBoundary"
 import { I18nProvider } from "@/lib/i18n"
 import { i18nConfig } from "@/i18n/config" // import 侧效应触发 seedLocale
 import { router } from "@/app/router"
+import { appMetadata } from "@/app/metadata"
+import { applyAppTitle } from "@/lib/app-metadata"
+
+applyAppTitle(appMetadata.productName)
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -48,6 +48,8 @@ export function AppShell() {
       navItems={navItems}
       navigationLabel={t("导航")}
       title={t("账户中心")}
+      translate={t}
+      accountLinks={{ profile: { href: "/me/" }, security: { href: "/me/security" } }}
       brand={
         <img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain object-left" />
       }
@@ -76,6 +78,11 @@ export function AppShell() {
   )
 }
 
+function LocalizedNotFound() {
+  const { t } = useI18n()
+  return <NotFoundPage embedded translate={t} />
+}
+
 export const router = createBrowserRouter(
   [
     {path: "/sign-in", element: <LoginPage />},
@@ -102,9 +109,9 @@ export const router = createBrowserRouter(
         { path: "profile", element: page(<ProfileEditPage />) },
         { path: "403", element: <ForbiddenPage /> },
         { path: "500", element: <ServerErrorPage /> },
+        { path: "*", element: <LocalizedNotFound /> },
       ],
     },
-    { path: "*", element: <NotFoundPage /> },
   ],
   // 路由 basename 跟随 Vite base,但剥掉尾斜杠:vite base 为 /me/ 而裸路径 /me 入口
   // (无尾斜杠)在 RR8 下不匹配 basename 会渲染空树——规范化为 /me 后两种入口都命中。

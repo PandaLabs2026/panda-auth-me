@@ -21,6 +21,10 @@ describe("AppShell wiring", () => {
     await user.click(screen.getByRole("button", { name: "切换语言" }))
     expect(screen.getByText("Navigation")).toBeInTheDocument()
     expect(screen.queryByText("导航")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /测试用户/ }))
+    expect(screen.getByRole("menuitem", { name: "Profile" })).toHaveAttribute("href", "/me/")
+    expect(screen.getByRole("menuitem", { name: "Account and security" })).toHaveAttribute("href", "/me/security")
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument()
   })
 
   it("renders PandaAuth brand, account-center nav items and the app-home header action", () => {

@@ -162,5 +162,10 @@
   "验证令牌无效或已过期，请核对或重新发送验证邮件": "The verification token is invalid or expired. Check it or send a new verification email.",
   "资料内容不符合要求，请检查后重试": "Some profile details are invalid. Check them and try again.",
   "提交内容过大，请缩小后重试": "The submitted content is too large. Reduce it and try again.",
-  "请求未获接受，请重新读取资料后再试": "The request was rejected. Read your profile again before retrying."
+  "请求未获接受，请重新读取资料后再试": "The request was rejected. Read your profile again before retrying.",
+  "个人资料": "Profile",
+  "账号与安全": "Account and security",
+  "页面不存在": "Page not found",
+  "地址可能已变更或从未存在。": "The address may have changed or never existed.",
+  "回到首页": "Back to home"
 }
