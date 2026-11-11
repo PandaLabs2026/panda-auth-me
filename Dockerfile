@@ -34,8 +34,8 @@ COPY panda-auth-share/ panda-auth-share/
 RUN dotnet publish panda-auth-me/src/PandaAuth.Me -c Release -o /app --no-restore --nologo
 
 # ================= 运行阶段 =================
-# .NET/ASP.NET安全补丁10.0.14；与Server共用已核验的不可变运行时基线。
-FROM mcr.microsoft.com/dotnet/aspnet:10.0.14@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c AS runtime
+# .NET/ASP.NET安全补丁10.0.15；与Server共用已核验的不可变运行时基线。
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.15@sha256:bfd912c83295ce66d4b706ebb8541b9f14259b0e76fbb88b2751f58ce2399d2e AS runtime
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get -o Acquire::Retries=0 -o Acquire::https::Timeout=30 update \
     && apt-get -o Acquire::Retries=0 install -y --no-install-recommends --only-upgrade apt=2.8.4ubuntu0.1 libapt-pkg6.0t64=2.8.4ubuntu0.1 \
