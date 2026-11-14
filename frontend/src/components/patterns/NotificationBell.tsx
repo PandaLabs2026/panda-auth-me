@@ -6,8 +6,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useNotifications } from '@/hooks/use-notifications';
 
 /**
- * 通知铃铛（v0.5.0）：header 常驻入口。与通知中心页共用同一 store 约定
- * （useNotifications）；本组件自带实例,页面级中心用 hook 自取数据。
+ * 通知铃铛（v0.5.0）：header 常驻入口。与通知中心页等所有 useNotifications
+ * 实例共用模块级同一份 store：任一视图的已读操作即时同步到本组件角标。
  */
 export default function NotificationBell() {
   const { items, unread, markAllRead } = useNotifications();
