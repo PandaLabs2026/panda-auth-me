@@ -75,7 +75,11 @@ test('container manifest-only install preserves dependency lifecycle scripts',{s
 });
 
 for(const command of ['ci','install'])test(`dependency entry deps:${command} rejects before resolution`,t=>{
-  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'dependency-entry-'));
+  // The preflight's Windows volume rule (workspace under D:\dev) fires before
+  // the temp-variable rejection, so on Windows the fixture must live under the
+  // registered task temp root instead of os.tmpdir() (C:\...).
+  const base=process.platform==='win32'?path.join('D:\\dev\\tmp'):os.tmpdir();
+  const directory=fs.mkdtempSync(path.join(base,'dependency-entry-'));
   t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
   const packageDir=path.join(directory,'frontend'),helper=path.join(directory,'frontend/scripts/capacity-build.mjs');
   fs.mkdirSync(packageDir,{recursive:true});fs.mkdirSync(path.dirname(helper),{recursive:true});
