@@ -242,8 +242,8 @@ export default function ProfileEditPage() {
     <Card><CardHeader><CardTitle>{t("头像")}</CardTitle></CardHeader><CardContent className="space-y-4">
       {(preview || profile.hasAvatar) && <img key={profile.revision + preview} src={preview || "/me/api/profile/avatar"} alt={t("个人头像")} className="size-20 rounded-full object-cover"/>}
       <p>{t("JPEG、PNG 或 WebP，最多 2 MiB。图片将由服务器规范化处理。")}</p>
-      <label htmlFor="profile-avatar" className="sr-only">{t("选择头像")}</label>
-      <Input ref={avatarInput} id="profile-avatar" type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" tabIndex={-1} disabled={busy} onChange={event => chooseAvatar(event.target.files?.[0])}/>
+      <label htmlFor="profile-avatar" hidden>{t("选择头像")}</label>
+      <input ref={avatarInput} id="profile-avatar" type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={busy} onChange={event => chooseAvatar(event.target.files?.[0])}/>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" disabled={busy} onClick={() => avatarInput.current?.click()}>{t("选择图片")}</Button>
         <Button disabled={writeBlocked || !avatar} onClick={() => avatar && confirmVerificationInvalidation() && void mutate(() => profileApi.uploadAvatar(avatar, profile.revision), "头像已保存", { clearAvatar: true, section: "avatar" })}>{t("上传头像")}</Button>
