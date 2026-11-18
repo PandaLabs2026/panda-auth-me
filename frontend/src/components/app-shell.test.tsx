@@ -11,6 +11,7 @@ afterEach(() => {
   cleanup()
   localStorage.setItem("panda.me.lang", "zh-CN")
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe("AppShell wiring", () => {
@@ -22,7 +23,7 @@ describe("AppShell wiring", () => {
     expect(screen.getByText("Navigation")).toBeInTheDocument()
     expect(screen.queryByText("导航")).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /测试用户/ }))
-    expect(screen.getByRole("menuitem", { name: "Profile" })).toHaveAttribute("href", "/me/")
+    expect(screen.queryByRole("menuitem", { name: "Profile" })).not.toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: "Account and security" })).toHaveAttribute("href", "/me/security")
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument()
   })
@@ -40,8 +41,21 @@ describe("AppShell wiring", () => {
     expect(logo).toHaveClass("h-9", "w-auto", "object-contain")
     // 导航:账户中心两页。
     expect(screen.getByRole("link", { name: "账户总览" })).toBeInTheDocument()
-    expect(screen.getByText("安全设置")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "账号与安全" })).toBeInTheDocument()
     // 顶栏常驻件:返回来源应用(会话 appHomeUrl)。
     expect(screen.getByText("返回应用")).toHaveAttribute("href", "https://appliket.example/")
+  })
+
+  it("links both navigation and account menu directly to the enabled profile page", async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => new Response(JSON.stringify(
+      path === "/me/api/session"
+        ? { subject: "actor", name: "Session user", email: null, roles: [], profileEditingEnabled: true }
+        : { displayName: "Saved user", biography: null, hasAvatar: false, contactEmail: { address: null, state: "none" }, revision: '"0"' },
+    ), { headers: { "Content-Type": "application/json" } })))
+    render(<Providers session="fetch"><AppShell /></Providers>)
+    expect(await screen.findByRole("link", { name: "个人资料" })).toHaveAttribute("href", "/profile")
+    await user.click(await screen.findByRole("button", { name: /Saved user/ }))
+    expect(screen.getByRole("menuitem", { name: "个人资料" })).toHaveAttribute("href", "/me/profile")
   })
 })

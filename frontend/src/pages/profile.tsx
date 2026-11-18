@@ -1,18 +1,21 @@
 import { Link } from "react-router"
+import { useContext } from "react"
 
 import PageHeader from "@/components/patterns/PageHeader"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useI18n } from "@/lib/i18n"
 import { useSession } from "@/lib/auth"
+import { ProfilePresentationContext } from "@/lib/profile-presentation"
 
 /**
- * 账户中心主页：展示当前身份；安全设置直达；登录记录 / 设备管理 / 授权管理在 Phase 2 实装。
+ * 账户中心主页展示当前身份及可用的自助入口。
  * 壳（侧栏/顶栏/登出/返回应用）在模板 AppLayout,本页只管内容区。
  */
 export default function ProfilePage() {
   const { t } = useI18n()
   const session = useSession()
+  const profile = useContext(ProfilePresentationContext)
 
   if (session.isPending) {
     return (
@@ -41,33 +44,26 @@ export default function ProfilePage() {
       <PageHeader title={t("账户总览")} description={t("PandaAuth 账户的身份信息与自助入口。")} />
       <Card>
         <CardHeader>
-          <CardTitle>{s.displayName || t("未设置名称")}</CardTitle>
+          <img className="size-14 rounded-full object-cover" src={profile.avatarUrl ?? "/me/brand/default-avatar.svg"} alt={t("个人头像")} />
+          <CardTitle>{profile.displayName || s.displayName || t("未设置名称")}</CardTitle>
           <CardDescription>
-            {s.email ?? t("邮箱暂不可用")}
+            {t("登录邮箱")} · <span>{s.email ?? t("邮箱暂不可用")}</span>
           </CardDescription>
         </CardHeader>
       </Card>
       {s.profileEditingEnabled && <Button asChild variant="outline"><Link to="/profile">{t("编辑个人资料")}</Link></Button>}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">{t("安全设置")}</CardTitle>
-            <CardDescription>{t("TOTP 与恢复码管理")}</CardDescription>
+            <CardTitle className="text-sm">{t("账号与安全")}</CardTitle>
+            <CardDescription>{t("登录邮箱、密码、验证器和恢复码")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild variant="outline" size="sm">
-              <Link to="/security">{t("打开安全设置")}</Link>
+              <Link to="/security">{t("打开账号与安全")}</Link>
             </Button>
           </CardContent>
         </Card>
-        {["登录记录", "设备管理", "授权管理"].map((title) => (
-          <Card key={title}>
-            <CardHeader>
-              <CardTitle className="text-sm">{t(title)}</CardTitle>
-              <CardDescription>{t("Phase 2 上线")}</CardDescription>
-            </CardHeader>
-          </Card>
-        ))}
       </div>
     </div>
   )

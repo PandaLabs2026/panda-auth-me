@@ -60,6 +60,7 @@ export default function AppLayout({
   translate,
   accountLinks,
   userContext,
+  identityPresentation,
 }: {
   navItems: NavItem[];
   /** 本地化侧栏分组标题；由使用方随语言切换传入。 */
@@ -84,6 +85,8 @@ export default function AppLayout({
   accountLinks?: AccountLinks;
   /** Already-authorized display context; never inferred from global role claims. */
   userContext?: UserContext;
+  /** Optional owner-supplied profile presentation for the current authenticated session. */
+  identityPresentation?: { displayName?: string; avatarUrl?: string };
 }) {
   const t = (message: string) => translate?.(message)?.trim() || message;
   const { data: session } = useSession();
@@ -150,8 +153,9 @@ export default function AppLayout({
         </SidebarContent>
         <SidebarFooter>
           <NavUser
-            avatarUrl={authMode === 'demo' && session ? `${import.meta.env.BASE_URL}demo-avatar.png` : undefined}
-            name={session?.displayName ?? t('未登录')}
+            avatarUrl={session ? identityPresentation?.avatarUrl
+              ?? (authMode === 'demo' ? `${import.meta.env.BASE_URL}demo-avatar.png` : undefined) : undefined}
+            name={session ? identityPresentation?.displayName?.trim() || session.displayName : t('未登录')}
             email={session?.email}
             translate={translate}
             links={accountLinks}

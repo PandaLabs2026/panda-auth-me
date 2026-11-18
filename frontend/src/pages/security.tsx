@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import QRCode from "qrcode"
 
 import { useAuthLeaveGuard } from "@/components/patterns/auth/context"
@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { GrantRequiredError, MfaRequestError, StaleMfaResponseError, mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
 import { useI18n } from "@/lib/i18n"
+import { ProfilePresentationContext } from "@/lib/profile-presentation"
 
 /**
  * 安全设置：普通用户自助管理 MFA（TOTP / 恢复码）。Passkey 已退役且表已删除
@@ -27,6 +28,7 @@ import { useI18n } from "@/lib/i18n"
  */
 export default function SecurityPage() {
   const { t } = useI18n()
+  const { loginEmail } = useContext(ProfilePresentationContext)
 
   const [status, setStatus] = useState<MfaStatus | null>(null)
   const [factors, setFactors] = useState<MfaFactor[]>([])
@@ -208,9 +210,22 @@ export default function SecurityPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={t("安全设置")}
+        title={t("账号与安全")}
         description={t("管理 TOTP 验证器与恢复码；敏感操作需要验证码和当前密码。")}
       />
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("登录邮箱与密码")}</CardTitle>
+          <CardDescription>{t("凭据修改成功后需要重新登录。")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p>{t("登录邮箱")} · {loginEmail ?? t("邮箱暂不可用")}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline"><a href="/account/change-email?returnUrl=%2Fme%2Fsecurity">{t("更换登录邮箱")}</a></Button>
+            <Button asChild variant="outline"><a href="/account/change-password?returnUrl=%2Fme%2Fsecurity">{t("修改密码")}</a></Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {loading && (
         <p role="status" className="text-muted-foreground">{t("加载中…")}</p>
