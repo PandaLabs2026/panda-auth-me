@@ -86,6 +86,44 @@ it("shows unavailable without a misleading editable form when feature is closed"
   expect(screen.queryByLabelText("名称")).not.toBeInTheDocument()
 })
 
+it("resumes a delivered verification without sending a replacement email", async () => {
+  const pending = { ...saved, contactEmail: { address: "contact@example.invalid", state: "pending" as const,
+    pendingVerification: { challengeId: "resumed-challenge", expiresAt: "2099-01-01T00:00:00Z" } } }
+  vi.mocked(profileApi.read).mockResolvedValue(pending)
+  vi.mocked(profileApi.confirmContact).mockResolvedValue({ ...saved,
+    contactEmail: { address: "contact@example.invalid", state: "verified" } })
+  const user = userEvent.setup()
+  render(<Providers><ProfileEditPage /></Providers>)
+  await user.type(await screen.findByLabelText("邮件中的验证令牌"), "mail-only")
+  await user.click(screen.getByRole("button", { name: "确认联系邮箱" }))
+  expect(await screen.findByText("已验证")).toBeInTheDocument()
+  expect(profileApi.confirmContact).toHaveBeenCalledWith("resumed-challenge", "mail-only")
+  expect(profileApi.createChallenge).not.toHaveBeenCalled()
+})
+
+it("requires a choice before replacing a field changed on another device", async () => {
+  const latest = { ...saved, displayName: "Latest name", revision: '"1"' }
+  vi.mocked(profileApi.read).mockResolvedValueOnce(saved).mockResolvedValueOnce(latest)
+  vi.mocked(profileApi.patch)
+    .mockRejectedValueOnce(new ProfileRequestError(412, "profile_revision_mismatch"))
+    .mockResolvedValueOnce({ ...latest, displayName: "My draft", revision: '"2"' })
+  const user = userEvent.setup()
+  render(<Providers><ProfileEditPage /></Providers>)
+  const name = await screen.findByLabelText("名称")
+  await user.clear(name)
+  await user.type(name, "My draft")
+  const save = screen.getByRole("button", { name: "保存基本资料" })
+  await user.click(save)
+  await screen.findByRole("alert")
+  await user.click(screen.getByRole("button", { name: "重新读取资料" }))
+  expect(await screen.findByText("Latest name")).toBeInTheDocument()
+  expect(save).toBeDisabled()
+  await user.click(screen.getByRole("button", { name: "保留我的修改" }))
+  await user.click(save)
+  await screen.findByText("资料已保存")
+  expect(profileApi.patch).toHaveBeenNthCalledWith(2, { displayName: "My draft" }, '"1"')
+})
+
 it("rejects oversized avatars before any API write", async () => {
   const user = userEvent.setup()
   render(<Providers><ProfileEditPage /></Providers>)
@@ -177,7 +215,7 @@ it("renders the private editor and contact state in English", async () => {
   localStorage.setItem("panda.me.lang", "en")
   render(<Providers><ProfileEditPage /></Providers>)
   expect(await screen.findByLabelText("Name", { exact: true })).toHaveValue("Alice")
-  expect(screen.getByRole("heading", { name: "Edit personal profile" })).toBeInTheDocument()
+  expect(screen.getByRole("heading", { name: "Profile" })).toBeVisible()
   expect(screen.getByText("Contact email not set")).toBeInTheDocument()
   expect(screen.getByRole("button", { name: "Send verification email" })).toBeInTheDocument()
   expect(screen.queryByText("保存基本资料")).not.toBeInTheDocument()

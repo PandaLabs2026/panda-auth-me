@@ -10,6 +10,18 @@ import { sessionApi } from '@/lib/auth';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
+test('an authorized profile name is displayed with the authenticated session email', async () => {
+  vi.spyOn(sessionApi, 'me').mockResolvedValue({ displayName: 'Session name', email: 'self@example.invalid' });
+  render(
+    <QueryClientProvider client={new QueryClient()}><MemoryRouter>
+      <AppLayout navItems={[]} identityPresentation={{ displayName: 'Saved profile name' }} />
+    </MemoryRouter></QueryClientProvider>,
+  );
+  expect(await screen.findByText('self@example.invalid')).toBeInTheDocument();
+  expect(screen.getByText('Saved profile name')).toBeInTheDocument();
+  expect(screen.queryByText('Session name')).not.toBeInTheDocument();
+});
+
 test('navigation group label accepts the application locale and updates when it changes', () => {
   const renderLayout = (label: string) => (
     <QueryClientProvider client={new QueryClient()}><MemoryRouter>

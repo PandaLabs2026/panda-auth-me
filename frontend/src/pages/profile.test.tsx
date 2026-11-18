@@ -18,8 +18,8 @@ describe("ProfilePage", () => {
   it("translates the security settings description in English", async () => {
     localStorage.setItem("panda.me.lang", "en")
     render(<Providers><ProfilePage /></Providers>)
-    expect(await screen.findByText("TOTP and recovery code management")).toBeInTheDocument()
-    expect(screen.queryByText("TOTP 与恢复码管理")).not.toBeInTheDocument()
+    expect(await screen.findByText("Sign-in email, password, authenticator and recovery codes")).toBeInTheDocument()
+    expect(screen.queryByText("登录邮箱、密码、验证器和恢复码")).not.toBeInTheDocument()
   })
 
   it("renders the identity card and self-service entries from the session", async () => {
@@ -40,11 +40,11 @@ describe("ProfilePage", () => {
 
     render(<Providers session="fetch"><ProfilePage /></Providers>)
 
-    // Descriptive session names are shown; placeholders remain explicit.
+    // The overview shows only available self-service destinations.
     expect(await screen.findByText("张三")).toBeInTheDocument()
     expect(screen.getByText(/zhang@example\.com/)).toBeInTheDocument()
-    expect(screen.getByText("登录记录")).toBeInTheDocument()
-    expect(screen.getAllByText("Phase 2 上线")).toHaveLength(3)
+    expect(screen.getByRole("link", { name: "打开账号与安全" })).toHaveAttribute("href", "/security")
+    expect(screen.queryByText("Phase 2 上线")).not.toBeInTheDocument()
   })
 
   it("keeps a loading skeleton at the content anchor while the session loads", () => {

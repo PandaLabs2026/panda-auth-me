@@ -6,7 +6,11 @@ export interface SelfProfile {
   displayName: string | null
   biography: string | null
   hasAvatar: boolean
-  contactEmail: { address: string | null; state: "none" | "pending" | "verified" }
+  contactEmail: {
+    address: string | null
+    state: "none" | "pending" | "verified"
+    pendingVerification?: { challengeId: string; expiresAt: string }
+  }
   revision: string
 }
 export class ProfileRequestError extends Error {
@@ -19,12 +23,22 @@ function selfProfile(value: unknown): SelfProfile {
   if (!value || typeof value !== "object") throw new ProfileRequestError(0, "profile_response_invalid")
   const p = value as Record<string, unknown>
   const contact = p.contactEmail as Record<string, unknown> | null
+  const pending = contact?.pendingVerification
   if (!(p.displayName === null || typeof p.displayName === "string")
     || !(p.biography === null || typeof p.biography === "string") || typeof p.hasAvatar !== "boolean"
     || typeof p.revision !== "string" || !/^"(?:0|[a-f0-9]{32})"$/.test(p.revision)
     || !contact || !["none", "pending", "verified"].includes(String(contact.state))
     || !(contact.address === null || typeof contact.address === "string")
     || (contact.state === "none" ? contact.address !== null : typeof contact.address !== "string")) {
+    throw new ProfileRequestError(0, "profile_response_invalid")
+  }
+  if (pending !== undefined && (contact.state !== "pending"
+      || !pending || typeof pending !== "object"
+      || !("challengeId" in pending) || typeof pending.challengeId !== "string"
+      || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(pending.challengeId)
+      || !("expiresAt" in pending) || typeof pending.expiresAt !== "string"
+      || !/^\d{4}-\d\d-\d\dT.+(?:Z|\+00:00)$/.test(pending.expiresAt)
+      || !Number.isFinite(Date.parse(pending.expiresAt)))) {
     throw new ProfileRequestError(0, "profile_response_invalid")
   }
   return value as SelfProfile

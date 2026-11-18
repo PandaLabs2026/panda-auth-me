@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react"
 import { createBrowserRouter } from "react-router"
-import { ExternalLinkIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
+import { ExternalLinkIcon, HouseIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
 import AppLayout, { type NavItem } from "@/components/patterns/AppLayout"
 import HeaderActions from "@/components/header-actions"
 import { SessionGate } from "@/app/SessionGate"
@@ -9,8 +9,9 @@ import LoginPage from "@/pages/login"
 import NotFoundPage from "@/pages/NotFoundPage"
 import ServerErrorPage from "@/pages/ServerErrorPage"
 import { useI18n } from "@/lib/i18n"
-import { sessionApi, useLogout } from "@/lib/auth"
+import { sessionApi, useLogout, useSession } from "@/lib/auth"
 import { notify } from "@/lib/notify"
+import { ProfilePresentationContext, useProfilePresentation } from "@/lib/profile-presentation"
 
 /**
  * 路由(模板 v0.5.0 形态):/login 为桥接页(立即整页跳 BFF /me/login 走 OIDC 挑战),
@@ -39,17 +40,22 @@ const page = (node: React.ReactNode) => <Suspense fallback={<PageFallback />}>{n
 export function AppShell() {
   const { t } = useI18n()
   const logout = useLogout()
+  const { data: session } = useSession()
+  const profile = useProfilePresentation()
   const navItems: NavItem[] = [
-    { to: "/", label: t("账户总览"), icon: UserRoundIcon, end: true },
-    { to: "/security", label: t("安全设置"), icon: ShieldCheckIcon },
+    { to: "/", label: t("账户总览"), icon: HouseIcon, end: true },
+    ...(session?.profileEditingEnabled ? [{ to: "/profile", label: t("个人资料"), icon: UserRoundIcon }] : []),
+    { to: "/security", label: t("账号与安全"), icon: ShieldCheckIcon },
   ]
   return (
+    <ProfilePresentationContext.Provider value={profile}>
     <AppLayout
       navItems={navItems}
       navigationLabel={t("导航")}
       title={t("账户中心")}
       translate={t}
-      accountLinks={{ profile: { href: "/me/" }, security: { href: "/me/security" } }}
+      accountLinks={{ profile: session?.profileEditingEnabled ? { href: "/me/profile" } : null, security: { href: "/me/security" } }}
+      identityPresentation={profile}
       brand={
         <img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain object-left" />
       }
@@ -75,6 +81,7 @@ export function AppShell() {
         },
       ]}
     />
+    </ProfilePresentationContext.Provider>
   )
 }
 
