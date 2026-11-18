@@ -44,6 +44,41 @@ it("keeps the draft on conflict and offers explicit reread without automatic ove
   expect(screen.getByRole("button", { name: "重新读取资料" })).toBeInTheDocument()
 })
 
+it.each([
+  {
+    editedField: "名称", draft: "My display name", patch: { displayName: "My display name" },
+    untouchedField: "简介", latestValue: "Bio saved elsewhere", serverChange: { biography: "Bio saved elsewhere" },
+  },
+  {
+    editedField: "简介", draft: "My bio", patch: { biography: "My bio" },
+    untouchedField: "名称", latestValue: "Name saved elsewhere", serverChange: { displayName: "Name saved elsewhere" },
+  },
+])("uses the latest untouched field after rereading a conflict on $editedField", async ({
+  editedField, draft, patch, untouchedField, latestValue, serverChange,
+}) => {
+  const latest = { ...saved, ...serverChange, revision: '"1"' }
+  vi.mocked(profileApi.read).mockResolvedValueOnce(saved).mockResolvedValueOnce(latest)
+  vi.mocked(profileApi.patch)
+    .mockRejectedValueOnce(new ProfileRequestError(412, "profile_revision_mismatch"))
+    .mockResolvedValueOnce({ ...latest, ...patch, revision: '"2"' })
+  const user = userEvent.setup()
+  render(<Providers><ProfileEditPage /></Providers>)
+
+  const input = await screen.findByLabelText(editedField)
+  await user.clear(input)
+  await user.type(input, draft)
+  await user.click(screen.getByRole("button", { name: "保存基本资料" }))
+  await screen.findByRole("alert")
+  await user.click(screen.getByRole("button", { name: "重新读取资料" }))
+
+  await waitFor(() => expect(screen.getByLabelText(untouchedField)).toHaveValue(latestValue))
+  expect(input).toHaveValue(draft)
+  expect(profileApi.patch).toHaveBeenCalledTimes(1)
+  await user.click(screen.getByRole("button", { name: "保存基本资料" }))
+  await screen.findByText("资料已保存")
+  expect(profileApi.patch).toHaveBeenNthCalledWith(2, patch, '"1"')
+})
+
 it("shows unavailable without a misleading editable form when feature is closed", async () => {
   vi.mocked(profileApi.read).mockRejectedValue(new ProfileRequestError(404, "profile_unavailable"))
   render(<Providers><ProfileEditPage /></Providers>)

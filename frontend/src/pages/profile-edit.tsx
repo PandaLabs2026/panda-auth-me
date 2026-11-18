@@ -25,7 +25,9 @@ export default function ProfileEditPage() {
   const [challenge, setChallenge] = useState("")
   const [token, setToken] = useState("")
   const generation = useRef(0)
-  const textDirty = profile !== null && (name !== (profile.displayName ?? "") || bio !== (profile.biography ?? ""))
+  const nameDirty = profile !== null && name !== (profile.displayName ?? "")
+  const bioDirty = profile !== null && bio !== (profile.biography ?? "")
+  const textDirty = nameDirty || bioDirty
   const dirty = uncertain || textDirty || avatar !== null || (address !== "" && address !== profile?.contactEmail.address) || token !== ""
   const writeBlocked = busy || conflict || uncertain
   const blocker = useBlocker(dirty && !meAuthLifecycle.paused())
@@ -35,8 +37,10 @@ export default function ProfileEditPage() {
     else blocker.reset()
   }, [blocker, t])
 
-  function loadValues(value: SelfProfile) {
-    setProfile(value); setName(value.displayName ?? ""); setBio(value.biography ?? "")
+  function loadValues(value: SelfProfile, preserveDraft = false) {
+    setProfile(value)
+    if (!preserveDraft || !nameDirty) setName(value.displayName ?? "")
+    if (!preserveDraft || !bioDirty) setBio(value.biography ?? "")
   }
   function failure(reason: unknown, write = false) {
     setNotice("")
@@ -61,8 +65,7 @@ export default function ProfileEditPage() {
     try {
       const value = await profileApi.read()
       if (generation.current !== current) return
-      if (preserveDraft && dirty) setProfile(value)
-      else loadValues(value)
+      loadValues(value, preserveDraft)
       setChallenge(""); setToken("")
       setConflict(false)
       setUncertain(false)
@@ -94,13 +97,12 @@ export default function ProfileEditPage() {
 
   async function save() {
     if (!profile) return
-    const nameChanged = name !== (profile.displayName ?? "")
-    if ((nameChanged && ([...name.trim()].length < 1 || [...name.trim()].length > 80)) || [...bio].length > 1000) {
+    if ((nameDirty && ([...name.trim()].length < 1 || [...name.trim()].length > 80)) || [...bio].length > 1000) {
       setError("名称须为 1–80 个字符，简介最多 1000 个字符"); return
     }
     const patch: { displayName?: string; biography?: string | null } = {}
-    if (nameChanged) patch.displayName = name.trim()
-    if (bio !== (profile.biography ?? "")) patch.biography = bio || null
+    if (nameDirty) patch.displayName = name.trim()
+    if (bioDirty) patch.biography = bio || null
     const current = generation.current
     setBusy(true); setError(""); setNotice("")
     try {
