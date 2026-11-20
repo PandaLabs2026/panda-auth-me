@@ -1,5 +1,9 @@
 import { useContext, useEffect, useRef, useState } from "react"
 import { useBlocker } from "react-router"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -44,12 +48,24 @@ export default function ProfileEditPage() {
   const textDirty = nameDirty || bioDirty
   const dirty = uncertain || textDirty || avatar !== null || (address !== "" && address !== profile?.contactEmail.address) || token !== ""
   const writeBlocked = busy || conflict || uncertain
-  const blocker = useBlocker(dirty && !meAuthLifecycle.paused())
+  const blocker = useBlocker((dirty || busy) && !meAuthLifecycle.paused())
+  const [confirmation, setConfirmation] = useState<{
+    title: string; description: string; action: () => void; destructive: boolean
+  } | null>(null)
+  const confirmTrigger = useRef<HTMLElement | null>(null)
+  const leaving = blocker.state === "blocked"
+  const invalidation = "保存此更改会使当前邮箱验证码失效。"
+  function ask(title: string, description: string, action: () => void, destructive = false) {
+    confirmTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setConfirmation({ title, description, action, destructive })
+  }
+  function cancelConfirmation() {
+    if (blocker.state === "blocked") blocker.reset()
+    setConfirmation(null)
+  }
   useEffect(() => {
-    if (blocker.state !== "blocked") return
-    if (window.confirm(t("离开将丢弃未保存的个人资料，是否继续？"))) blocker.proceed()
-    else blocker.reset()
-  }, [blocker, t])
+    if (busy && blocker.state === "blocked") blocker.reset()
+  }, [busy, blocker])
 
   function loadValues(value: SelfProfile, preserveDraft = false) {
     setProfile(value)
@@ -104,6 +120,7 @@ export default function ProfileEditPage() {
     const off = meAuthLifecycle.subscribe(() => {
       if (!meAuthLifecycle.paused()) return
       retire()
+      setConfirmation(null)
       setProfile(null); setName(""); setBio(""); setNotice(""); setBusy(false)
       setAvatar(null); setPreview(""); setAddress(""); setChallenge(""); setToken("")
       setOverlaps([]); setSection("page")
@@ -129,7 +146,7 @@ export default function ProfileEditPage() {
     return () => { release(); window.removeEventListener("beforeunload", prevent) }
   }, [dirty, t])
 
-  async function save() {
+  async function save(confirmed = false) {
     if (!profile || writeBlocked || !textDirty || overlaps.length > 0) return
     setSection("basics")
     const invalidName = nameDirty && ([...name.trim()].length < 1 || [...name.trim()].length > 80)
@@ -139,7 +156,10 @@ export default function ProfileEditPage() {
       setError(invalidName ? "名称须为 1–80 个字符。" : "简介最多 1000 个字符。")
       return
     }
-    if (!confirmVerificationInvalidation()) return
+    if (activeChallenge && !confirmed) {
+      ask("保存基本资料", invalidation, () => void save(true))
+      return
+    }
     const patch: { displayName?: string; biography?: string | null } = {}
     if (nameDirty) patch.displayName = name.trim()
     if (bioDirty) patch.biography = bio || null
@@ -151,10 +171,6 @@ export default function ProfileEditPage() {
       loadValues(value); setChallenge(""); setToken(""); setNotice("资料已保存")
     } catch (reason) { if (generation.current === current) failure(reason, true) }
     finally { if (generation.current === current) setBusy(false) }
-  }
-
-  function confirmVerificationInvalidation() {
-    return !activeChallenge || window.confirm(t("保存此更改会使当前邮箱验证码失效。仍要继续吗？"))
   }
 
   async function mutate(operation: () => Promise<SelfProfile>, message: string, options: { keepChallenge?: boolean; clearAvatar?: boolean; section?: Section } = {}) {
@@ -234,6 +250,29 @@ export default function ProfileEditPage() {
       <h1 className="text-2xl font-semibold">{t("个人资料")}</h1>
       <p className="text-sm text-muted-foreground">{t("个人资料仅本人可见。")}</p>
     </div>
+    <AlertDialog open={Boolean(confirmation || (leaving && !busy))} onOpenChange={open => { if (!open) cancelConfirmation() }}>
+      <AlertDialogContent onCloseAutoFocus={event => {
+        if (confirmTrigger.current?.isConnected) {
+          event.preventDefault()
+          confirmTrigger.current.focus()
+        }
+        confirmTrigger.current = null
+      }}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(leaving ? "有未保存的个人资料" : confirmation?.title ?? "")}</AlertDialogTitle>
+          <AlertDialogDescription>{t(leaving ? "离开将丢弃未保存的个人资料。" : confirmation?.description ?? "")}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t(leaving ? "继续编辑" : "取消")}</AlertDialogCancel>
+          <AlertDialogAction variant={leaving || confirmation?.destructive ? "destructive" : "default"} onClick={event => {
+            event.preventDefault()
+            if (blocker.state === "blocked") blocker.proceed()
+            else if (!writeBlocked && !meAuthLifecycle.paused()) confirmation?.action()
+            setConfirmation(null)
+          }}>{t(leaving ? "放弃并离开" : confirmation?.destructive ? "确认删除" : "继续保存")}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     {feedback("page")}
     {busy && !profile && <p role="status">{t("正在读取个人资料")}</p>}
     {profile && <>
@@ -244,9 +283,15 @@ export default function ProfileEditPage() {
       <input ref={avatarInput} id="profile-avatar" type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={busy} onChange={event => chooseAvatar(event.target.files?.[0])}/>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" disabled={busy} onClick={() => avatarInput.current?.click()}>{t("选择图片")}</Button>
-        <Button disabled={writeBlocked || !avatar} onClick={() => avatar && confirmVerificationInvalidation() && void mutate(() => profileApi.uploadAvatar(avatar, profile.revision), "头像已保存", { clearAvatar: true, section: "avatar" })}>{t("上传头像")}</Button>
+        <Button disabled={writeBlocked || !avatar} onClick={() => {
+          if (!avatar) return
+          const upload = () => void mutate(() => profileApi.uploadAvatar(avatar, profile.revision), "头像已保存", { clearAvatar: true, section: "avatar" })
+          if (activeChallenge) ask("上传头像", invalidation, upload)
+          else upload()
+        }}>{t("上传头像")}</Button>
         <Button variant="outline" disabled={writeBlocked || !profile.hasAvatar} onClick={() => {
-          if (window.confirm(t("确定删除头像？")) && confirmVerificationInvalidation()) void mutate(() => profileApi.deleteAvatar(profile.revision), "头像已删除", { clearAvatar: true, section: "avatar" })
+          ask("删除头像", activeChallenge ? "删除头像也会使当前邮箱验证码失效。" : "删除后将显示默认头像。",
+            () => void mutate(() => profileApi.deleteAvatar(profile.revision), "头像已删除", { clearAvatar: true, section: "avatar" }), true)
         }}>{t("删除头像")}</Button>
       </div>
       {feedback("avatar")}
@@ -284,7 +329,7 @@ export default function ProfileEditPage() {
       {profile.contactEmail.state === "pending" && !activeChallenge && <p>{t("请重新发送验证邮件以开始本次确认。")}</p>}
       <div className="flex flex-wrap gap-2">
         {profile.contactEmail.state === "pending" && profile.contactEmail.address && <Button variant="outline" disabled={writeBlocked} onClick={() => void sendContact(profile.contactEmail.address!)}>{t("重新发送验证邮件")}</Button>}
-        <Button variant="outline" disabled={writeBlocked || profile.contactEmail.state === "none"} onClick={() => { if (window.confirm(t("确定删除联系邮箱及未完成的验证？"))) void mutate(() => profileApi.deleteContact(profile.revision), "联系邮箱已删除") }}>{t("删除联系邮箱")}</Button>
+        <Button variant="outline" disabled={writeBlocked || profile.contactEmail.state === "none"} onClick={() => { ask("删除联系邮箱", "这会删除联系邮箱及未完成的验证。", () => void mutate(() => profileApi.deleteContact(profile.revision), "联系邮箱已删除"), true) }}>{t("删除联系邮箱")}</Button>
       </div>
       {feedback("contact")}
     </CardContent></Card></>}

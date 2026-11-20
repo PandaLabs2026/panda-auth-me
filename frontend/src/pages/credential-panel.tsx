@@ -10,7 +10,6 @@ import { markOperationUncertain, meAuthLifecycle, meAuthNavigation } from "@/lib
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout"
 import { useI18n } from "@/lib/i18n"
 
-const startPath = "/account/change-email"
 const confirmPath = "/account/confirm-email-change"
 const securityPath = "/me/security"
 const jsonHeaders = { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" }
@@ -19,15 +18,23 @@ const messages: Record<string, string> = {
   email_unconfirmed: "请先确认当前邮箱。",
   password_invalid: "当前密码不正确。",
   email_unavailable: "无法变更邮箱，请检查目标地址。",
+  password_breached: "该密码出现在已知泄露库中，请更换新密码。",
+  password_check_unavailable: "暂时无法核验密码安全性，请稍后再试。",
+  password_policy: "新密码至少 10 个字符，包含大小写字母、数字和符号。",
   token_invalid: "验证令牌错误、已使用或已过期。",
 }
 
-export default function LoginEmailPanel({ subject, trigger, onClose }: {
+export default function CredentialPanel({ kind, subject, trigger, onClose }: {
+  kind: "email" | "password"
   subject: string
   trigger: RefObject<HTMLButtonElement | null>
   onClose: () => void
 }) {
   const { t } = useI18n()
+  const changingPassword = kind === "password"
+  const startPath = changingPassword ? "/account/change-password" : "/account/change-email"
+  const unavailable = changingPassword ? "密码修改暂不可用，请稍后重试。" : "登录邮箱编辑暂不可用，请稍后重试。"
+  const [newPassword, setNewPassword] = useState("")
   const [step, setStep] = useState<"email" | "verify" | "done" | "reauthenticate">("email")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -38,8 +45,8 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
   const emailInput = useRef<HTMLInputElement>(null)
   const tokenInput = useRef<HTMLInputElement>(null)
   const relogin = useRef<HTMLButtonElement>(null)
-  const formId = "change-login-email"
-  const dirty = step === "verify" || Boolean(email || password || token)
+  const formId = "change-credentials"
+  const dirty = step === "verify" || Boolean(email || password || newPassword || token)
 
   const blocker = useBlocker(dirty || saving)
   const guard = usePanelCloseGuard({
@@ -56,7 +63,7 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
     if (blocker.state === "blocked") requestClose("route-change")
   }, [blocker.state, requestClose])
   useBrowserUnloadGuard(dirty || saving)
-  useAuthLeaveGuard(dirty || saving, "未完成的登录邮箱变更")
+  useAuthLeaveGuard(dirty || saving, "未完成的登录凭据变更")
 
   useEffect(() => {
     if (step === "email") emailInput.current?.focus()
@@ -75,7 +82,7 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
   }, [onClose])
 
   function requireLogin(message: string) {
-    setEmail(""); setPassword(""); setToken("")
+    setEmail(""); setPassword(""); setNewPassword(""); setToken("")
     setError(message)
     setStep("reauthenticate")
   }
@@ -93,9 +100,9 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
       const csrf = await fetchWithTimeout(startPath, { ...init, headers: jsonHeaders }, async response => {
         if (response.status === 401 || response.status === 403) return null
         if (!response.ok || !response.headers.get("content-type")?.includes("application/json"))
-          throw new Error("登录邮箱编辑暂不可用，请稍后重试。")
+          throw new Error(unavailable)
         const result: { token?: unknown } = await response.json()
-        if (typeof result.token !== "string" || !result.token) throw new Error("登录邮箱编辑暂不可用，请稍后重试。")
+        if (typeof result.token !== "string" || !result.token) throw new Error(unavailable)
         return result.token
       })
       if (!current()) return
@@ -103,9 +110,10 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
         requireLogin("登录状态已变化，请重新登录后继续。")
         return
       }
-      const body = new URLSearchParams({ NewEmail: email.trim() })
-      if (step === "email") body.set("CurrentPassword", password)
-      else body.set("Token", token.trim())
+      const body = new URLSearchParams(changingPassword
+        ? { CurrentPassword: password, NewPassword: newPassword }
+        : { NewEmail: email.trim(), ...(step === "email" ? { CurrentPassword: password } : { Token: token.trim() }) })
+      setNewPassword("")
       setPassword("")
       posted = true
       await fetchWithTimeout(step === "email" ? startPath : confirmPath, {
@@ -114,7 +122,7 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
       }, async response => {
         if (!current()) return
         if (response.status === 204) {
-          if (step === "email") setStep("verify")
+          if (!changingPassword && step === "email") setStep("verify")
           else { setEmail(""); setToken(""); setStep("done") }
           return
         }
@@ -133,13 +141,15 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
           setError("操作过于频繁，请稍后重试")
           return
         }
-        throw new Error("登录邮箱编辑暂不可用，请稍后重试。")
+        throw new Error(unavailable)
       })
     } catch {
       if (posted) markOperationUncertain(subject)
       if (!current()) return
-      if (posted) requireLogin("操作结果待核实，请重新登录后查看当前登录邮箱。")
-      else setError("登录邮箱编辑暂不可用，请稍后重试。")
+      if (posted) requireLogin(changingPassword
+        ? "密码修改结果待核实，请重新登录。"
+        : "操作结果待核实，请重新登录后查看当前登录邮箱。")
+      else setError(unavailable)
     } finally {
       if (current()) {
         request.current = null
@@ -148,30 +158,35 @@ export default function LoginEmailPanel({ subject, trigger, onClose }: {
     }
   }
 
-  return <ContextPanel open guard={guard} title={t("更换登录邮箱")}
-    description={t("验证当前密码和新登录邮箱。")}
+  return <ContextPanel open guard={guard} title={t(changingPassword ? "修改密码" : "更换登录邮箱")}
+    description={t(changingPassword ? "修改成功后，请使用新密码重新登录。" : "验证当前密码和新登录邮箱。")}
     mode="edit" status={saving ? "saving" : error ? "error" : "ready"} returnFocusRef={trigger}
     footer={step === "done" || step === "reauthenticate" ?
       <Button ref={relogin} onClick={() => meAuthNavigation.start(securityPath, true)}>{t("重新登录")}</Button> :
       <>
         <Button type="button" variant="outline" disabled={saving} onClick={() => guard.requestClose()}>{t("取消")}</Button>
         <Button type="submit" form={formId} disabled={saving}>
-          {t(step === "email" ? "发送验证邮件" : "确认更换")}
+          {t(changingPassword ? "保存新密码" : step === "email" ? "发送验证邮件" : "确认更换")}
         </Button>
       </>}>
-    {step === "done" && <p role="status">{t("登录邮箱已更换。请重新登录。")}</p>}
+    {step === "done" && <p role="status">{t(changingPassword ? "密码已修改。请重新登录。" : "登录邮箱已更换。请重新登录。")}</p>}
     {(step === "email" || step === "verify") && <form id={formId} onSubmit={submit} className="grid gap-4">
       {step === "email" ? <>
-        <div className="grid gap-2">
+        {!changingPassword && <div className="grid gap-2">
           <Label htmlFor="new-login-email">{t("新登录邮箱")}</Label>
           <Input ref={emailInput} id="new-login-email" type="email" autoComplete="email" required maxLength={256} value={email}
             disabled={saving} onChange={event => setEmail(event.target.value)} />
-        </div>
+        </div>}
         <div className="grid gap-2">
           <Label htmlFor="change-email-password">{t("当前密码")}</Label>
-          <Input id="change-email-password" type="password" autoComplete="current-password" required value={password}
+          <Input ref={changingPassword ? emailInput : undefined} id="change-email-password" type="password" autoComplete="current-password" required value={password}
             disabled={saving} onChange={event => setPassword(event.target.value)} />
         </div>
+        {changingPassword && <div className="grid gap-2">
+          <Label htmlFor="new-password">{t("新密码")}</Label>
+          <Input id="new-password" type="password" autoComplete="new-password" required value={newPassword}
+            disabled={saving} onChange={event => setNewPassword(event.target.value)} />
+        </div>}
       </> : <>
         <p className="break-all text-sm">{t("请输入发往 {email} 的验证令牌。", { email: email.trim() })}</p>
         <div className="grid gap-2">

@@ -116,6 +116,50 @@ describe("SecurityPage", () => {
     }
   })
 
+  it("keeps password changes in the security ContextPanel", async () => {
+    const post = vi.fn(async () => new Response(null, {status: 204}))
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init: RequestInit) => {
+      if (input === "/account/change-password") {
+        if (init.method === "POST") return post()
+        return jsonResponse({token: "csrf"})
+      }
+      return totpUserState().find(([path]) => path === input)![1]()
+    }))
+    const client = new QueryClient()
+    client.setQueryData(["session"], testSession)
+    const router = createMemoryRouter([{path: "/", element: <SecurityPage />}])
+    render(<QueryClientProvider client={client}><I18nProvider config={i18nConfig}>
+      <RouterProvider router={router} />
+    </I18nProvider></QueryClientProvider>)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", {name: "修改密码"}))
+    expect(await screen.findByRole("dialog", {name: "修改密码"})).toHaveAttribute("data-slot", "context-panel-content")
+    await user.type(screen.getByLabelText("当前密码"), "fixture-old")
+    await user.type(screen.getByLabelText("新密码"), "fixture-new")
+    await user.click(screen.getByRole("button", {name: "保存新密码"}))
+    expect(await screen.findByRole("button", {name: "重新登录"})).toBeInTheDocument()
+    expect(post).toHaveBeenCalledOnce()
+    expect(screen.getByRole("heading", {name: "账号与安全"})).toBeInTheDocument()
+  })
+
+  it("dismisses saved recovery codes and cancels a pending authenticator setup", async () => {
+    routeFetch([
+      ["/account/mfa/user/totp/options", () => jsonResponse({factorId: "draft", secret: "fixture-secret", provisioningUri: "otpauth://totp/Fixture?secret=AAAA"})],
+      ["/account/mfa/user/recovery-codes", () => jsonResponse(["fixture-recovery"])],
+      antiforgery, ...totpUserState(),
+    ])
+    render(<Providers><SecurityPage /></Providers>)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole("button", {name: "更换 TOTP"}))
+    expect(await screen.findByText("fixture-secret")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", {name: "取消配置"}))
+    expect(screen.queryByText("fixture-secret")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", {name: "生成新恢复码"}))
+    expect(await screen.findByText("fixture-recovery")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", {name: "已保存恢复码"}))
+    expect(screen.queryByText("fixture-recovery")).not.toBeInTheDocument()
+  })
+
   it("shows the TOTP revocation explanation in English", async () => {
     localStorage.setItem("panda.me.lang", "en")
     routeFetch(totpUserState())

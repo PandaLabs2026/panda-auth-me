@@ -20,7 +20,7 @@ import { GrantRequiredError, MfaRequestError, StaleMfaResponseError, mfaApi, typ
 import { useI18n } from "@/lib/i18n"
 import { ProfilePresentationContext } from "@/lib/profile-presentation"
 import { useSession } from "@/lib/auth"
-import LoginEmailPanel from "@/pages/login-email-panel"
+import CredentialPanel from "@/pages/credential-panel"
 
 /**
  * 安全设置：普通用户自助管理 MFA（TOTP / 恢复码）。Passkey 已退役且表已删除
@@ -32,9 +32,10 @@ export default function SecurityPage() {
   const { t } = useI18n()
   const { loginEmail } = useContext(ProfilePresentationContext)
   const { data: session } = useSession()
-  const [emailPanelOpen, setEmailPanelOpen] = useState(false)
+  const [credentialPanel, setCredentialPanel] = useState<"email" | "password" | null>(null)
   const emailTrigger = useRef<HTMLButtonElement>(null)
-  const closeEmailPanel = useCallback(() => setEmailPanelOpen(false), [])
+  const passwordTrigger = useRef<HTMLButtonElement>(null)
+  const closeCredentialPanel = useCallback(() => setCredentialPanel(null), [])
 
   const [status, setStatus] = useState<MfaStatus | null>(null)
   const [factors, setFactors] = useState<MfaFactor[]>([])
@@ -71,7 +72,7 @@ export default function SecurityPage() {
     } else setError(current(epoch) && cause instanceof Error ? cause.message : new StaleMfaResponseError().message)
   }, [current, lifetime])
   function beginOperation(key: string) {
-    if (emailPanelOpen || operation.current || meAuthLifecycle.paused() || hasUncertainOperation() || reauthenticationNeeded) return undefined
+    if (credentialPanel !== null || operation.current || meAuthLifecycle.paused() || hasUncertainOperation() || reauthenticationNeeded) return undefined
     operation.current = true; setBusy(key); setError(null); setNotice(null)
     return meAuthLifecycle.epoch()
   }
@@ -183,15 +184,20 @@ export default function SecurityPage() {
     })
   }
 
+  function clearTotpSetup() {
+    lifetime.qr++
+    setTotpSetup(null)
+    setTotpQrSvg(null)
+    setTotpCode("")
+  }
+
   function onConfirmTotp() {
     if (!totpSetup) return
     void run("totp-confirm", async () => {
       const epoch = meAuthLifecycle.epoch()
       await mfaApi.totpConfirm(totpSetup.factorId, totpCode)
       if (!current(epoch)) throw new StaleMfaResponseError()
-      setTotpSetup(null)
-      setTotpQrSvg(null)
-      setTotpCode("")
+      clearTotpSetup()
       return t("TOTP 已启用。")
     })
   }
@@ -227,14 +233,16 @@ export default function SecurityPage() {
         <CardContent className="space-y-3">
           <p>{t("登录邮箱")} · {loginEmail ?? t("邮箱暂不可用")}</p>
           <div className="flex flex-wrap gap-2">
-            <Button ref={emailTrigger} variant="outline" disabled={!session?.subject || paused || uncertain || busy !== null || pendingGrant !== null}
-              onClick={() => setEmailPanelOpen(true)}>{t("更换登录邮箱")}</Button>
-            <Button asChild variant="outline"><a href="/account/change-password?returnUrl=%2Fme%2Fsecurity">{t("修改密码")}</a></Button>
+            <Button ref={emailTrigger} variant="outline" disabled={credentialPanel !== null || !session?.subject || paused || uncertain || busy !== null || pendingGrant !== null}
+              onClick={() => setCredentialPanel("email")}>{t("更换登录邮箱")}</Button>
+            <Button ref={passwordTrigger} variant="outline" disabled={credentialPanel !== null || !session?.subject || paused || uncertain || busy !== null || pendingGrant !== null}
+              onClick={() => setCredentialPanel("password")}>{t("修改密码")}</Button>
           </div>
         </CardContent>
       </Card>
-      {emailPanelOpen && session?.subject && <LoginEmailPanel key={session.subject} subject={session.subject}
-        trigger={emailTrigger} onClose={closeEmailPanel} />}
+      {credentialPanel && session?.subject && <CredentialPanel key={credentialPanel + ":" + session.subject}
+        kind={credentialPanel} subject={session.subject} trigger={credentialPanel === "email" ? emailTrigger : passwordTrigger}
+        onClose={closeCredentialPanel} />}
 
       {loading && (
         <p role="status" className="text-muted-foreground">{t("加载中…")}</p>
@@ -292,7 +300,7 @@ export default function SecurityPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {!totpSetup && (
-                  <Button variant="outline" size="sm" disabled={emailPanelOpen || busy !== null || paused || uncertain || reauthenticationNeeded} onClick={onBeginTotp}>
+                  <Button variant="outline" size="sm" disabled={credentialPanel !== null || busy !== null || paused || uncertain || reauthenticationNeeded} onClick={onBeginTotp}>
                     {busy === "totp-begin"
                       ? t("生成中…")
                       : hasTotp
@@ -328,8 +336,11 @@ export default function SecurityPage() {
                         onChange={(event) => setTotpCode(event.target.value)}
                       />
                     </div>
-                    <Button size="sm" disabled={emailPanelOpen || busy !== null || paused || uncertain || reauthenticationNeeded || totpCode.length !== 6} onClick={onConfirmTotp}>
+                    <Button size="sm" disabled={credentialPanel !== null || busy !== null || paused || uncertain || reauthenticationNeeded || totpCode.length !== 6} onClick={onConfirmTotp}>
                       {busy === "totp-confirm" ? t("确认中…") : t("确认 TOTP")}
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={busy !== null} onClick={clearTotpSetup}>
+                      {t("取消配置")}
                     </Button>
                   </>
                 )}
@@ -349,7 +360,7 @@ export default function SecurityPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={emailPanelOpen || busy !== null || paused || uncertain || reauthenticationNeeded}
+                  disabled={credentialPanel !== null || busy !== null || paused || uncertain || reauthenticationNeeded}
                   onClick={() =>
                     void guarded(
                       "recovery",
@@ -368,6 +379,8 @@ export default function SecurityPage() {
                         <span key={code}>{code}</span>
                       ))}
                     </div>
+                    <Button className="mt-3" variant="outline" size="sm" disabled={busy !== null}
+                      onClick={() => setRecoveryCodes(null)}>{t("已保存恢复码")}</Button>
                   </div>
                 )}
               </CardContent>
