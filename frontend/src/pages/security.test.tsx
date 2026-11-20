@@ -1,12 +1,17 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createMemoryRouter, Link, RouterProvider } from "react-router"
 import SecurityPage from "@/pages/security"
 import { SessionGate } from "@/app/SessionGate"
 import { useSession } from "@/lib/auth"
 import { meAuthLifecycle } from "@/lib/auth-lifecycle"
 import { MfaRequestError, StaleMfaResponseError, mfaApi } from "@/lib/mfa-api"
 import { Providers } from "@/test/utils"
+import { testSession } from "@/test/session"
+import { I18nProvider } from "@/lib/i18n"
+import { i18nConfig } from "@/i18n/config"
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -64,6 +69,53 @@ afterEach(() => {
 })
 
 describe("SecurityPage", () => {
+  it("changes the login email in a guarded ContextPanel and keeps the security page mounted", async () => {
+    const calls: Array<[string, URLSearchParams, Headers]> = []
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init: RequestInit) => {
+      if (input === "/account/change-email" && init.method !== "POST") return jsonResponse({ token: "csrf" })
+      if (input === "/account/change-email" || input === "/account/confirm-email-change") {
+        calls.push([input, new URLSearchParams(String(init.body)), new Headers(init.headers)])
+        return new Response(null, { status: 204 })
+      }
+      const route = totpUserState().find(([path]) => input === path)
+      if (!route) throw new Error("Unexpected request: " + input)
+      return route[1]()
+    }))
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(["session"], testSession)
+    const router = createMemoryRouter([
+      { path: "/security", element: <><Link to="/profile">资料页</Link><SecurityPage /></> },
+      { path: "/profile", element: <p>资料页正文</p> },
+    ], { initialEntries: ["/security"] })
+    render(<QueryClientProvider client={queryClient}>
+      <I18nProvider config={i18nConfig}><RouterProvider router={router} /></I18nProvider>
+    </QueryClientProvider>)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "更换登录邮箱" }))
+    const dialog = await screen.findByRole("dialog", { name: "更换登录邮箱" })
+    expect(dialog).toHaveAttribute("data-slot", "context-panel-content")
+    await user.type(screen.getByLabelText("新登录邮箱"), "new@example.com")
+    await user.click(screen.getByRole("link", { name: "资料页" }))
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "继续编辑" }))
+    expect(screen.getByLabelText("新登录邮箱")).toHaveValue("new@example.com")
+    await user.type(screen.getByLabelText("当前密码"), "synthetic")
+    await user.click(screen.getByRole("button", { name: "发送验证邮件" }))
+    await user.type(await screen.findByLabelText("验证令牌"), "synthetic-token")
+    await user.click(screen.getByRole("button", { name: "确认更换" }))
+    expect(await screen.findByRole("button", { name: "重新登录" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "账号与安全" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/security")
+    expect(calls.map(([path, body]) => [path, Object.fromEntries(body)])).toEqual([
+      ["/account/change-email", { NewEmail: "new@example.com", CurrentPassword: "synthetic" }],
+      ["/account/confirm-email-change", { NewEmail: "new@example.com", Token: "synthetic-token" }],
+    ])
+    for (const [, , headers] of calls) {
+      expect(headers.get("RequestVerificationToken")).toBe("csrf")
+      expect(headers.get("X-Panda-Account-Subject")).toBe(testSession.subject)
+    }
+  })
+
   it("shows the TOTP revocation explanation in English", async () => {
     localStorage.setItem("panda.me.lang", "en")
     routeFetch(totpUserState())

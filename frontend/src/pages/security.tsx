@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label"
 import { GrantRequiredError, MfaRequestError, StaleMfaResponseError, mfaApi, type MfaFactor, type MfaStatus } from "@/lib/mfa-api"
 import { useI18n } from "@/lib/i18n"
 import { ProfilePresentationContext } from "@/lib/profile-presentation"
+import { useSession } from "@/lib/auth"
+import LoginEmailPanel from "@/pages/login-email-panel"
 
 /**
  * 安全设置：普通用户自助管理 MFA（TOTP / 恢复码）。Passkey 已退役且表已删除
@@ -29,6 +31,10 @@ import { ProfilePresentationContext } from "@/lib/profile-presentation"
 export default function SecurityPage() {
   const { t } = useI18n()
   const { loginEmail } = useContext(ProfilePresentationContext)
+  const { data: session } = useSession()
+  const [emailPanelOpen, setEmailPanelOpen] = useState(false)
+  const emailTrigger = useRef<HTMLButtonElement>(null)
+  const closeEmailPanel = useCallback(() => setEmailPanelOpen(false), [])
 
   const [status, setStatus] = useState<MfaStatus | null>(null)
   const [factors, setFactors] = useState<MfaFactor[]>([])
@@ -65,7 +71,7 @@ export default function SecurityPage() {
     } else setError(current(epoch) && cause instanceof Error ? cause.message : new StaleMfaResponseError().message)
   }, [current, lifetime])
   function beginOperation(key: string) {
-    if (operation.current || meAuthLifecycle.paused() || hasUncertainOperation() || reauthenticationNeeded) return undefined
+    if (emailPanelOpen || operation.current || meAuthLifecycle.paused() || hasUncertainOperation() || reauthenticationNeeded) return undefined
     operation.current = true; setBusy(key); setError(null); setNotice(null)
     return meAuthLifecycle.epoch()
   }
@@ -221,11 +227,14 @@ export default function SecurityPage() {
         <CardContent className="space-y-3">
           <p>{t("登录邮箱")} · {loginEmail ?? t("邮箱暂不可用")}</p>
           <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline"><a href="/account/change-email?returnUrl=%2Fme%2Fsecurity">{t("更换登录邮箱")}</a></Button>
+            <Button ref={emailTrigger} variant="outline" disabled={!session?.subject || paused || uncertain || busy !== null || pendingGrant !== null}
+              onClick={() => setEmailPanelOpen(true)}>{t("更换登录邮箱")}</Button>
             <Button asChild variant="outline"><a href="/account/change-password?returnUrl=%2Fme%2Fsecurity">{t("修改密码")}</a></Button>
           </div>
         </CardContent>
       </Card>
+      {emailPanelOpen && session?.subject && <LoginEmailPanel key={session.subject} subject={session.subject}
+        trigger={emailTrigger} onClose={closeEmailPanel} />}
 
       {loading && (
         <p role="status" className="text-muted-foreground">{t("加载中…")}</p>
@@ -283,7 +292,7 @@ export default function SecurityPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {!totpSetup && (
-                  <Button variant="outline" size="sm" disabled={busy !== null || paused || uncertain || reauthenticationNeeded} onClick={onBeginTotp}>
+                  <Button variant="outline" size="sm" disabled={emailPanelOpen || busy !== null || paused || uncertain || reauthenticationNeeded} onClick={onBeginTotp}>
                     {busy === "totp-begin"
                       ? t("生成中…")
                       : hasTotp
@@ -319,7 +328,7 @@ export default function SecurityPage() {
                         onChange={(event) => setTotpCode(event.target.value)}
                       />
                     </div>
-                    <Button size="sm" disabled={busy !== null || paused || uncertain || reauthenticationNeeded || totpCode.length !== 6} onClick={onConfirmTotp}>
+                    <Button size="sm" disabled={emailPanelOpen || busy !== null || paused || uncertain || reauthenticationNeeded || totpCode.length !== 6} onClick={onConfirmTotp}>
                       {busy === "totp-confirm" ? t("确认中…") : t("确认 TOTP")}
                     </Button>
                   </>
@@ -340,7 +349,7 @@ export default function SecurityPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={busy !== null || paused || uncertain || reauthenticationNeeded}
+                  disabled={emailPanelOpen || busy !== null || paused || uncertain || reauthenticationNeeded}
                   onClick={() =>
                     void guarded(
                       "recovery",
