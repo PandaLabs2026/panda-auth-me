@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from "react"
-import { Link, useBlocker } from "react-router"
+import { useBlocker } from "react-router"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,7 +14,7 @@ type Section = "page" | "basics" | "avatar" | "contact"
 
 export default function ProfileEditPage() {
   const { t, locale } = useI18n()
-  const { confirmProfile, loginEmail, displayName } = useContext(ProfilePresentationContext)
+  const { confirmProfile } = useContext(ProfilePresentationContext)
   const [profile, setProfile] = useState<SelfProfile | null>(null)
   const [name, setName] = useState("")
   const [bio, setBio] = useState("")
@@ -232,9 +232,7 @@ export default function ProfileEditPage() {
   return <div className="mx-auto w-full max-w-3xl space-y-5">
     <div className="space-y-2">
       <h1 className="text-2xl font-semibold">{t("个人资料")}</h1>
-      {loginEmail && <p className="break-words text-sm">{t("当前账号")} · {displayName && `${displayName} · `}{loginEmail}</p>}
-      <p className="text-sm text-muted-foreground">{t("这些资料仅本人可见。登录邮箱和安全设置独立管理。")}</p>
-      <Button asChild variant="ghost"><Link to="/">{t("返回账户总览")}</Link></Button>
+      <p className="text-sm text-muted-foreground">{t("个人资料仅本人可见。")}</p>
     </div>
     {feedback("page")}
     {busy && !profile && <p role="status">{t("正在读取个人资料")}</p>}
@@ -272,7 +270,7 @@ export default function ProfileEditPage() {
       </form></CardContent>
     </Card>
     <Card><CardHeader><CardTitle>{t("联系邮箱")}</CardTitle></CardHeader><CardContent className="space-y-4">
-      <p>{t("联系邮箱独立于登录邮箱和找回渠道，不会改变登录凭据。")}</p>
+      <p>{t("联系邮箱仅用于联系。登录邮箱在「账号与安全」管理。")}</p>
       <p className="break-words">{profile.contactEmail.address} <span>{t(profile.contactEmail.state === "verified" ? "已验证" : profile.contactEmail.state === "pending" ? "等待验证" : "未设置联系邮箱")}</span></p>
       <form className="space-y-3" onSubmit={event => { event.preventDefault(); void sendContact(address) }}>
         <label htmlFor="profile-contact">{t("联系邮箱")}</label><Input id="profile-contact" type="email" autoComplete="email" value={address} disabled={busy} required onChange={event => setAddress(event.target.value)}/>

@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react"
-import { createBrowserRouter } from "react-router"
-import { ExternalLinkIcon, HouseIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
+import { createBrowserRouter, Navigate } from "react-router"
+import { ExternalLinkIcon, LogOutIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react"
 import AppLayout, { type NavItem } from "@/components/patterns/AppLayout"
 import HeaderActions from "@/components/header-actions"
 import { SessionGate } from "@/app/SessionGate"
@@ -19,7 +19,6 @@ import { ProfilePresentationContext, useProfilePresentation } from "@/lib/profil
  * 内容区沿用 Template 默认全宽布局。
  */
 
-const ProfilePage = lazy(() => import("@/pages/profile"))
 const SecurityPage = lazy(() => import("@/pages/security"))
 const ProfileEditPage = lazy(() => import("@/pages/profile-edit"))
 
@@ -43,7 +42,6 @@ export function AppShell() {
   const { data: session } = useSession()
   const profile = useProfilePresentation()
   const navItems: NavItem[] = [
-    { to: "/", label: t("账户总览"), icon: HouseIcon, end: true },
     ...(session?.profileEditingEnabled ? [{ to: "/profile", label: t("个人资料"), icon: UserRoundIcon }] : []),
     { to: "/security", label: t("账号与安全"), icon: ShieldCheckIcon },
   ]
@@ -54,7 +52,6 @@ export function AppShell() {
       navigationLabel={t("导航")}
       title={t("账户中心")}
       translate={t}
-      accountLinks={{ profile: session?.profileEditingEnabled ? { href: "/me/profile" } : null, security: { href: "/me/security" } }}
       identityPresentation={profile}
       brand={
         <img src="/me/pandaauth-logo-horizontal.png" alt="PandaAuth by PandaLabs" className="h-9 w-auto max-w-full object-contain object-left" />
@@ -85,6 +82,11 @@ export function AppShell() {
   )
 }
 
+function AccountLanding() {
+  const { data: session } = useSession()
+  return <Navigate replace to={session?.profileEditingEnabled ? "/profile" : "/security"} />
+}
+
 function LocalizedNotFound() {
   const { t } = useI18n()
   return <NotFoundPage embedded translate={t} />
@@ -111,7 +113,7 @@ export const router = createBrowserRouter(
         </>
       ),
       children: [
-        { index: true, element: page(<ProfilePage />) },
+        { index: true, element: <AccountLanding /> },
         { path: "security", element: page(<SecurityPage />) },
         { path: "profile", element: page(<ProfileEditPage />) },
         { path: "403", element: <ForbiddenPage /> },
