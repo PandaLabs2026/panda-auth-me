@@ -162,15 +162,13 @@ it("clears the visible draft when the authenticated lifecycle pauses", async () 
 })
 
 it("keeps unsaved changes when leaving the page is declined", async () => {
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
   const user = userEvent.setup()
   render(<Providers><Link to="/security">账号与安全</Link><ProfileEditPage /></Providers>)
   await user.type(await screen.findByLabelText("名称"), " private draft")
   await user.click(screen.getByRole("link", { name: "账号与安全" }))
-  expect(confirm).toHaveBeenCalledOnce()
+  await user.click(await screen.findByRole("button", { name: "继续编辑" }))
   expect(screen.getByLabelText("名称")).toHaveValue("Alice private draft")
   expect(screen.queryByText("Security destination")).not.toBeInTheDocument()
-  confirm.mockRestore()
 })
 
 it("does not discard a selected avatar when saving a separate contact email", async () => {
@@ -187,14 +185,13 @@ it("does not discard a selected avatar when saving a separate contact email", as
 it("requires a reread after an uncertain deletion before another write", async () => {
   vi.mocked(profileApi.read).mockResolvedValue({ ...saved, hasAvatar: true })
   vi.mocked(profileApi.deleteAvatar).mockRejectedValue(new TypeError("offline fixture"))
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true)
   const user = userEvent.setup()
   render(<Providers><ProfileEditPage /></Providers>)
   await user.click(await screen.findByRole("button", { name: "删除头像" }))
+  await user.click(await screen.findByRole("button", { name: "确认删除" }))
   expect(await screen.findByRole("alert")).toHaveTextContent("操作结果未确认")
   expect(screen.getByRole("button", { name: "删除头像" })).toBeDisabled()
   expect(screen.getByRole("button", { name: "重新读取资料" })).toBeEnabled()
-  confirm.mockRestore()
 })
 
 it("reports a rejected contact token as invalid while retaining it for correction", async () => {
