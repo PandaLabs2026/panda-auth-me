@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-import { createMemoryRouter, RouterProvider } from "react-router"
+import { createMemoryRouter, Link, RouterProvider } from "react-router"
 import { I18nProvider } from "@/lib/i18n"
 import { i18nConfig } from "@/i18n/config"
 import type { ReactNode } from "react"
@@ -14,7 +14,7 @@ vi.mock("@/lib/profile-api", async importOriginal => {
 })
 const saved = { displayName: "Alice", biography: "Original", hasAvatar: false, contactEmail: { address: null, state: "none" as const }, revision: '"0"' }
 function Providers({ children }: { children: ReactNode }) {
-  const router = createMemoryRouter([{ path: "/profile", element: children }, { path: "/", element: <p>Account overview destination</p> }], { initialEntries: ["/profile"] })
+  const router = createMemoryRouter([{ path: "/profile", element: children }, { path: "/security", element: <p>Security destination</p> }], { initialEntries: ["/profile"] })
   return <I18nProvider config={i18nConfig}><RouterProvider router={router}/></I18nProvider>
 }
 beforeEach(() => { vi.mocked(profileApi.read).mockResolvedValue(saved) })
@@ -164,12 +164,12 @@ it("clears the visible draft when the authenticated lifecycle pauses", async () 
 it("keeps unsaved changes when leaving the page is declined", async () => {
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
   const user = userEvent.setup()
-  render(<Providers><ProfileEditPage /></Providers>)
+  render(<Providers><Link to="/security">账号与安全</Link><ProfileEditPage /></Providers>)
   await user.type(await screen.findByLabelText("名称"), " private draft")
-  await user.click(screen.getByRole("link", { name: "返回账户总览" }))
+  await user.click(screen.getByRole("link", { name: "账号与安全" }))
   expect(confirm).toHaveBeenCalledOnce()
   expect(screen.getByLabelText("名称")).toHaveValue("Alice private draft")
-  expect(screen.queryByText("Account overview destination")).not.toBeInTheDocument()
+  expect(screen.queryByText("Security destination")).not.toBeInTheDocument()
   confirm.mockRestore()
 })
 
