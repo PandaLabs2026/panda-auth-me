@@ -229,7 +229,7 @@ export default function ProfileEditPage() {
     </div>
   }
 
-  return <div className="mx-auto w-full max-w-3xl space-y-5">
+  return <div className="w-full min-w-0 space-y-5">
     <div className="space-y-2">
       <h1 className="text-2xl font-semibold">{t("个人资料")}</h1>
       <p className="text-sm text-muted-foreground">{t("个人资料仅本人可见。")}</p>
