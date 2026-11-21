@@ -177,17 +177,15 @@ if (string.IsNullOrWhiteSpace(clientSecret))
     throw new InvalidOperationException("缺少 Auth:ClientSecret 配置（me-web 为机密客户端，密钥须由部署环境注入）。");
 }
 
-// 发起应用入口（部署注入，如租户门户 https://t0000.s001.pandalabs.cn 或组织入口 https://appliket.com）：
-// 配置后账户中心页眉显示「返回应用」外链。信任级别与 Auth:Issuer 相同——来自受控部署环境而非用户输入；
-// 未配置或缺省时 /me/api/session 返回 null，前端隐藏链接（各部署可独立采用，不阻断启动）；
-// 配置了但不是绝对 https URL 则启动失败——错误值比缺失更危险，宁可不启动也不下发坏链接。
-// 命名演进（v0.5.x）：AppHome* 为正名——返回目标不一定是「门户」（组织 hub/工作台皆可）；
-// 旧 PortalHome* 键保留为弃用别名（优先 AppHome*，未设时回落），存量部署零破坏。
-var portalHomeUrl = builder.Configuration["Auth:AppHomeUrl"] ?? builder.Configuration["Auth:PortalHomeUrl"];
-if (!string.IsNullOrWhiteSpace(portalHomeUrl) &&
-    (!Uri.TryCreate(portalHomeUrl, UriKind.Absolute, out var portalHome) || portalHome.Scheme != Uri.UriSchemeHttps))
+// 实例默认返回地址通过部署配置提供。留空时会话返回 null，界面隐藏返回链接。
+var portalHomeUrl = builder.Configuration["Auth:AppHomeUrl"];
+if (string.IsNullOrWhiteSpace(portalHomeUrl))
 {
-    throw new InvalidOperationException("Auth:AppHomeUrl（或弃用别名 Auth:PortalHomeUrl）配置了但不是绝对 https URL；请修正或移除该配置。");
+    portalHomeUrl = null;
+}
+else if (!Uri.TryCreate(portalHomeUrl, UriKind.Absolute, out var portalHome) || portalHome.Scheme != Uri.UriSchemeHttps)
+{
+    throw new InvalidOperationException("Auth:AppHomeUrl 须为绝对 HTTPS URL。");
 }
 // 链接文案（可选,默认「返回应用」）：部署语境各异（租户门户/组织入口/工作台），可配不可滥——
 // 纯文本、长度上限 32，渲染走 React 文本节点（自动转义,无注入面）。
