@@ -32,6 +32,26 @@ public sealed class SessionStatusValidationTests
     }
 
     [Theory]
+    [InlineData(null, null)]
+    [InlineData("  ", null)]
+    [InlineData("https://app.example.invalid/", "https://app.example.invalid/")]
+    public async Task SessionProjectsOnlyCanonicalAppHomeUrl(string? appHomeUrl, string? expectedHomeUrl)
+    {
+        using var factory = Factory(new State("valid")).WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Auth:PortalHomeUrl", "https://legacy.example.invalid/");
+            if (appHomeUrl is not null)
+                builder.UseSetting("Auth:AppHomeUrl", appHomeUrl);
+        });
+        using var client = Client(factory);
+        client.DefaultRequestHeaders.Add("Cookie", Cookie(factory, "valid"));
+        using var response = await client.GetAsync("/me/api/session");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expectedHomeUrl, payload.GetProperty("appHomeUrl").GetString());
+    }
+
+    [Theory]
     [InlineData("valid")]
     [InlineData("expired")]
     public async Task ProfileReadUsesValidatedCurrentAccessToken(string mode)
