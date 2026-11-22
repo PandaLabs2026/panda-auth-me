@@ -86,7 +86,9 @@ export const sessionApi = {
         const raw: unknown = await res.json()
         if (!isBffSession(raw)) throw new Error("会话响应格式无效")
         return {
-          displayName: raw.nickname?.trim() || raw.name?.trim() || "",
+          displayName: [raw.nickname, raw.name].map(value => value?.trim()).find(value => value
+            && value !== raw.subject && value.toLowerCase() !== raw.email?.trim().toLowerCase()
+            && !/^[^\s@]+@[^\s@]+$/.test(value)) ?? "",
           email: raw.email ?? undefined,
           roles: raw.roles,
           accountEntryUrl: null,

@@ -86,7 +86,7 @@ export default function AppLayout({
   /** Already-authorized display context; never inferred from global role claims. */
   userContext?: UserContext;
   /** Optional owner-supplied profile presentation for the current authenticated session. */
-  identityPresentation?: { displayName?: string; avatarUrl?: string };
+  identityPresentation?: { displayName?: string | null; avatarUrl?: string };
 }) {
   const t = (message: string) => translate?.(message)?.trim() || message;
   const { data: session } = useSession();
@@ -155,7 +155,8 @@ export default function AppLayout({
           <NavUser
             avatarUrl={session ? identityPresentation?.avatarUrl
               ?? (authMode === 'demo' ? `${import.meta.env.BASE_URL}demo-avatar.png` : undefined) : undefined}
-            name={session ? identityPresentation?.displayName?.trim() || session.displayName : t('未登录')}
+            name={session ? (identityPresentation?.displayName === undefined
+              ? session.displayName : identityPresentation.displayName?.trim() || t('未设置名称')) : t('未登录')}
             email={session?.email}
             translate={translate}
             links={accountLinks}

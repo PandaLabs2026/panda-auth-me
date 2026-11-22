@@ -5,7 +5,7 @@ import { meAuthLifecycle } from "./auth-lifecycle"
 import { profileApi, type SelfProfile } from "./profile-api"
 
 interface ProfilePresentation {
-  displayName?: string
+  displayName?: string | null
   avatarUrl?: string
   loginEmail?: string
   confirmProfile?: (profile: SelfProfile) => void
@@ -57,7 +57,7 @@ export function useProfilePresentation(): ProfilePresentation {
   }, [client, origin, paused, session?.profileEditingEnabled])
 
   return {
-    displayName: profile?.displayName?.trim() || undefined,
+    displayName: ready ? profile?.displayName ?? null : undefined,
     loginEmail: !paused ? session?.email : undefined,
     avatarUrl: ready && revision ? avatarUrl || undefined : undefined,
     confirmProfile: next => {
