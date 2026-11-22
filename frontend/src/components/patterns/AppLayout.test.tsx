@@ -22,6 +22,18 @@ test('an authorized profile name is displayed with the authenticated session ema
   expect(screen.queryByText('Session name')).not.toBeInTheDocument();
 });
 
+test('an empty saved display name does not revive the legacy session name', async () => {
+  vi.spyOn(sessionApi, 'me').mockResolvedValue({ displayName: 'Legacy name', email: 'self@example.invalid' });
+  render(
+    <QueryClientProvider client={new QueryClient()}><MemoryRouter>
+      <AppLayout navItems={[]} identityPresentation={{ displayName: null }} />
+    </MemoryRouter></QueryClientProvider>,
+  );
+
+  expect(await screen.findByText('未设置名称', {}, { timeout: 5000 })).toBeInTheDocument();
+  expect(screen.queryByText('Legacy name')).not.toBeInTheDocument();
+});
+
 test('navigation group label accepts the application locale and updates when it changes', () => {
   const renderLayout = (label: string) => (
     <QueryClientProvider client={new QueryClient()}><MemoryRouter>
