@@ -5,7 +5,7 @@
 # BuildKit 会优先取与 Dockerfile 同名的 `<Dockerfile>.dockerignore`，模式相对**上下文根**。
 #
 # 目的：把各仓构建产物与 VCS/编辑器元数据挡在上下文之外，否则构建结果会随构建机
-# 本地状态漂移（典型：宿主 node_modules 覆盖前端阶段 npm ci 装出的依赖树、
+# 本地状态漂移（典型：宿主 node_modules 覆盖前端阶段冻结安装的依赖树、
 # bin/obj 让 dotnet restore 复用陈旧产物）。
 #
 # 刻意不排除的路径：

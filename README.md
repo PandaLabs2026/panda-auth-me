@@ -85,4 +85,4 @@ and `PANDA_AUTH_TRUSTED_PROXY` to the allocation's exact IPv4 gateway. Same-subn
 loopback cannot supply trusted forwarded headers in bridge mode. Production ports and release
 commands are maintained in the sibling meta repository's `deploy/README.md`.
 
-Dependency updates use `npm run deps:install`. Both `deps:ci` and `deps:install` run capacity preflight before invoking npm.
+Dependency updates use `npm run deps:install`. Both `deps:ci` and `deps:install` run capacity preflight before invoking pnpm 12.21.0.
